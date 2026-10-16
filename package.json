@@ -1,0 +1,9 @@
+{
+  "name": "garden-house-boquete",
+  "private": true,
+  "version": "1.0.0",
+  "description": "The Garden House Boquete - Management System (guardado en Netlify Blobs)",
+  "dependencies": {
+    "@netlify/blobs": "^10.5.0"
+  }
+}

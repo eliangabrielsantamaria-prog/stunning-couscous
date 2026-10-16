@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Garden House Boquete — Management System</title>
+<style>
+:root{--g:#2f6b3f;--g2:#e8f3ea;--bd:#d5ddd6;--tx:#1d2a21;--r:#b3261e;--y:#fff6d6}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,Segoe UI,Arial,sans-serif;color:var(--tx);background:#f5f7f5;display:flex;min-height:100vh}
+nav{width:200px;background:var(--g);color:#fff;padding:12px;flex-shrink:0}nav h1{font-size:14px;margin:0 0 12px;line-height:1.3}
+nav button{display:block;width:100%;text-align:left;background:transparent;color:#fff;border:0;padding:10px;border-radius:6px;font-size:15px;cursor:pointer}
+nav button.on,nav button:hover{background:rgba(255,255,255,.18)}
+main{flex:1;padding:14px;min-width:0}
+.warn{background:var(--y);border:1px solid #e5d27a;padding:6px 10px;border-radius:6px;font-size:12px;margin-bottom:8px}
+.card{background:#fff;border:1px solid var(--bd);border-radius:8px;padding:12px;margin-bottom:12px}
+.grid{display:grid;gap:12px}.g2{grid-template-columns:1.3fr 1fr}.g3{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
+@media(max-width:850px){body{flex-direction:column}nav{width:100%;display:flex;flex-wrap:wrap;gap:4px}nav h1{width:100%}nav button{width:auto}.g2{grid-template-columns:1fr}}
+button.b,button.s{background:var(--g);color:#fff;border:0;border-radius:6px;padding:9px 14px;font-size:15px;cursor:pointer}
+button.s{background:#fff;color:var(--g);border:1px solid var(--g);padding:6px 10px;font-size:13px}button.d{background:var(--r);color:#fff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer}
+input,select{padding:8px;border:1px solid var(--bd);border-radius:6px;font-size:15px;max-width:100%}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:6px;border-bottom:1px solid var(--bd);text-align:left;vertical-align:top}th{background:var(--g2)}
+td.n,th.n{text-align:right}.prods{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-top:8px}
+.prods button{min-height:70px;background:var(--g2);border:1px solid var(--bd);border-radius:8px;font-size:14px;cursor:pointer}
+.tot{font-size:22px;font-weight:700}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}
+.tag{background:var(--g2);padding:2px 8px;border-radius:10px;font-size:12px}.red{color:var(--r)}.ok{color:var(--g)}
+.cal td{text-align:center;font-size:12px;min-width:46px}.cal .occ{background:#f6c9a8}.cal .res{background:#cfe3f7}
+.kpi{background:#fff;border:1px solid var(--bd);border-radius:8px;padding:10px}.kpi b{font-size:20px;display:block}
+label{font-size:13px}h3{margin:0 0 8px}
+.login{max-width:360px;margin:60px auto}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;padding:12px}
+.dg{background:#fff;border-radius:10px;padding:16px;max-width:430px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,.3)}
+.dg h3{margin:0 0 8px}.dg p{white-space:pre-line;margin:6px 0 10px}.dg label.ch{display:block;border:1px solid var(--bd);border-radius:8px;padding:10px;margin:6px 0;cursor:pointer;font-size:15px}
+.dg input[type=text],.dg input[type=password],.dg input[type=number]{width:100%}
+#toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#1d2a21;color:#fff;padding:10px 16px;border-radius:8px;z-index:10000;max-width:90%;font-size:14px;white-space:pre-line;display:none}
+</style>
+</head>
+<body>
+<nav id="nav"></nav>
+<main><div class="warn">Comprobantes <b>NO FISCALES</b>. Valida tasas y reglas con tu contador.</div><div id="sync" style="font-size:12px;margin:0 0 8px"></div><div id="bk"></div><div id="app"></div></main>
+<script>
+/* ================= Utilidades ================= */
+const $=s=>document.querySelector(s);
+const r2=x=>Math.round((x+Number.EPSILON)*100)/100;
+const M=x=>'$'+Number(x||0).toFixed(2);
+const today=()=>new Date(Date.now()-5*3600e3).toISOString().slice(0,10);
+const now=()=>new Date().toLocaleString('es-PA');
+const uid=p=>p+'-'+Date.now().toString(36)+Math.random().toString(36).slice(2,5).toUpperCase();
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const addDays=(d,n)=>new Date(new Date(d+'T12:00:00').getTime()+n*864e5).toISOString().slice(0,10);
+const KEY='gh_boquete_db_v2';
+function seed(){return{
+ taxes:[{id:'GRAV',name:'ITBMS general (comida preparada, empacados)',rate:7},{id:'ALCO',name:'ITBMS bebidas alcohólicas',rate:10},{id:'EXE',name:'Exento / no gravado',rate:0},{id:'ALOJ',name:'ITBMS hospedaje',rate:10}],
+ products:[
+  {id:'P001',code:'1001',name:'Café americano (DEMO)',cat:'Bebidas',price:3,cost:.6,stock:100,min:10,tax:'GRAV',ley6:true,active:true},
+  {id:'P002',code:'1002',name:'Pastel (DEMO)',cat:'Postres',price:4,cost:1.5,stock:20,min:5,tax:'GRAV',ley6:true,active:true},
+  {id:'P003',code:'1003',name:'Sándwich (DEMO)',cat:'Comidas',price:5.5,cost:2,stock:15,min:5,tax:'GRAV',ley6:true,active:true},
+  {id:'P004',code:'7501',name:'Agua embotellada (DEMO)',cat:'Empacados',price:1.5,cost:.5,stock:48,min:12,tax:'GRAV',ley6:false,active:true}],
+ rooms:[{id:'H1',name:'Habitación Jardín (DEMO)',cap:2,rate:45,estado:'disponible',seasons:[],active:true},{id:'H2',name:'Habitación Doble (DEMO)',cap:3,rate:60,estado:'disponible',seasons:[],active:true},{id:'H3',name:'Familiar (DEMO)',cap:5,rate:80,estado:'disponible',seasons:[],active:true}],
+ ley6:{code:'jubi',rest:25,hotelWeek:50,hotelWeekend:30,weekDays:[1,2,3,4]},
+ sales:[],returns:[],sessions:[],cur:null,res:[],audit:[],sec:null,users:[],suppliers:[],purchases:[],expenses:[],moves:[],loginFails:{}};}
+let db=JSON.parse(localStorage.getItem(KEY)||localStorage.getItem('gh_boquete_db_v1')||'null')||seed();
+function migrate(){const s=seed();for(const k in s)if(db[k]===undefined)db[k]=s[k];
+ if(!db.taxes.find(t=>t.id==='ALCO'))db.taxes.push(s.taxes[1]);
+ db.rooms.forEach(r=>{r.estado=r.estado||'disponible';r.seasons=r.seasons||[];if(r.active===undefined)r.active=true;});
+ db.products.forEach(p=>{if(p.active===undefined)p.active=true;});}
+migrate();
+let _saveErr=false;
+function save(){
+ try{localStorage.setItem(KEY,JSON.stringify(db));_saveErr=false;}catch(e){_saveErr=true;try{bkBanner();}catch(_){}}
+ snap();
+ syncMark();
+}
+function snap(){
+ try{const n=Date.now(),last=+localStorage.getItem(KEY+'_snapts')||0;if(n-last<20*60e3)return;
+  const a=JSON.parse(localStorage.getItem(KEY+'_snaps')||'[]');a.unshift({t:now(),d:JSON.stringify(db)});
+  localStorage.setItem(KEY+'_snaps',JSON.stringify(a.slice(0,3)));localStorage.setItem(KEY+'_snapts',String(n));
+ }catch(e){try{localStorage.removeItem(KEY+'_snaps');}catch(_){}}
+}
+const snaps=()=>{try{return JSON.parse(localStorage.getItem(KEY+'_snaps')||'[]');}catch(e){return[];}};
+function downloadBackup(){try{dl('respaldo-garden-house-'+today()+'.json',JSON.stringify(db),'application/json');}catch(e){toast('El navegador bloqueó la descarga. Permite descargas y usa Configuración > Descargar respaldo.');return;}db.lastBackup=Date.now();save();bkBanner();toast('Respaldo descargado. Guárdalo en un lugar seguro (USB, correo o nube).');}
+function bkBanner(){
+ const el=$('#bk');if(!el)return;
+ if(_saveErr){el.innerHTML='<div class="warn red"><b>Este navegador no está guardando los datos</b> (modo privado, almacenamiento lleno o archivo abierto sin permiso). Descarga un respaldo ahora y abre el sistema desde su dirección web en Chrome.</div> <button class="s" onclick="downloadBackup()">Descargar respaldo</button>';return;}
+ if(!me||(!db.sales.length&&!db.res.length&&!db.purchases.length)){el.innerHTML='';return;}
+ const hrs=db.lastBackup?(Date.now()-db.lastBackup)/36e5:1e9;
+ el.innerHTML=hrs>24?`<div class="warn red">${db.lastBackup?'Tu último respaldo fue hace '+Math.floor(hrs)+' horas.':'Aún no has descargado ningún respaldo.'} <button class="s" onclick="downloadBackup()">Descargar respaldo ahora</button></div>`:'';
+}
+let me=null;const user=()=>me?me.name:'Sistema';
+function log(op,detail){db.audit.push({t:now(),u:user(),op,detail});save();}
+const tax=id=>db.taxes.find(t=>t.id===id)||{rate:0};
+const prod=id=>db.products.find(p=>p.id===id);
+const isAdm=()=>me&&['Propietario','Administrador'].includes(me.role);
+async function sha(s){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+
+/* ================= Roles y sesión ================= */
+const LABEL={dash:'Inicio',pos:'Punto de venta',caja:'Caja',hist:'Ventas',hostal:'Hostal',inv:'Inventario',compras:'Compras',gastos:'Gastos',rep:'Reportes',cfg:'Configuración',aud:'Auditoría'};
+const ROLES={Propietario:['dash','pos','caja','hist','hostal','inv','compras','gastos','rep','cfg','aud'],
+ Administrador:['dash','pos','caja','hist','hostal','inv','compras','gastos','rep','aud'],
+ Recepción:['hostal'],Cajero:['pos','caja','hist'],Cafetería:['pos','hist','inv'],Almacén:['inv','compras'],Contabilidad:['dash','rep','gastos','hist','aud']};
+let view='pos';
+async function boot(){
+ migrate();
+ try{localStorage.setItem(KEY+'_probe','1');localStorage.removeItem(KEY+'_probe');}catch(e){_saveErr=true;}
+ bkBanner();
+ await syncInit();
+ const sid=sessionStorage.getItem('gh_me');if(sid)me=db.users.find(u=>u.id===sid)||null;
+ if(!db.users.length)return setupScreen();
+ if(!me)return loginScreen();
+ start();
+}
+function setupScreen(){$('#nav').innerHTML='';$('#app').innerHTML=`<div class="card login"><h3>Instalación: crear Propietario</h3><p><small>Este usuario tiene acceso total. Usa una contraseña de al menos 8 caracteres.</small></p>
+ <div class="row"><input id="su" placeholder="Nombre" style="width:100%"></div><div class="row"><input id="sp" type="password" placeholder="Contraseña" style="width:100%"></div><button class="b" onclick="mkOwner()">Crear</button></div>`;}
+async function mkOwner(){const n=$('#su').value.trim(),p=$('#sp').value;if(!n||p.length<8)return alert('Nombre y contraseña (mín. 8).');
+ const salt=uid('S');db.users.push({id:uid('U'),name:n,role:'Propietario',salt,hash:await sha(salt+p),active:true});me=db.users[0];sessionStorage.setItem('gh_me',me.id);log('USUARIO_CREADO','Propietario '+n);boot();}
+function loginScreen(){$('#nav').innerHTML='';$('#app').innerHTML=`<div class="card login"><h3>The Garden House Boquete</h3><div class="row"><select id="lu" style="width:100%">${db.users.filter(u=>u.active).map(u=>`<option value="${u.id}">${esc(u.name)} (${u.role})</option>`).join('')}</select></div>
+ <div class="row"><input id="lp" type="password" placeholder="Contraseña" style="width:100%" onkeydown="if(event.key==='Enter')login()"></div><button class="b" onclick="login()">Entrar</button></div>`;}
+async function login(){
+ const u=db.users.find(x=>x.id===$('#lu').value),f=db.loginFails[u.id]||{n:0,until:0};
+ if(f.until>Date.now())return alert('Cuenta bloqueada temporalmente por intentos fallidos. Intenta más tarde.');
+ if(await sha(u.salt+$('#lp').value)===u.hash){db.loginFails[u.id]={n:0,until:0};me=u;sessionStorage.setItem('gh_me',u.id);log('LOGIN','ok');start();}
+ else{f.n++;if(f.n>=5){f.until=Date.now()+5*60e3;f.n=0;}db.loginFails[u.id]=f;db.audit.push({t:now(),u:u.name,op:'LOGIN_FALLIDO',detail:''});save();alert('Contraseña incorrecta.');}
+}
+function logout(){log('LOGOUT','');me=null;sessionStorage.removeItem('gh_me');boot();}
+function start(){if(window._draftRestored&&ROLES[me.role].includes('pos')){toast('Se recuperó la venta que estaba en curso.');window._draftRestored=false;}const a=ROLES[me.role];view=a[0]==='dash'&&!['Propietario','Administrador','Contabilidad'].includes(me.role)?a[1]:a[0];buildNav();render();}
+function buildNav(){$('#nav').innerHTML=`<h1>THE GARDEN HOUSE BOQUETE<br>MANAGEMENT SYSTEM</h1>`+ROLES[me.role].map(k=>`<button class="${k===view?'on':''}" onclick="go('${k}')">${LABEL[k]}</button>`).join('')+`<button onclick="logout()">Salir (${esc(me.name)})</button>`;}
+function go(k){view=k;ed=null;er=null;buildNav();render();}
+const render=()=>{if(!me)return;({dash:vDash,pos:vPos,caja:vCaja,hist:vHist,hostal:vHostal,inv:vInv,compras:vCompras,gastos:vGastos,rep:vRep,cfg:vCfg,aud:vAud})[view]();bkBanner();SYNC.stale=false;setSync();};
+
+/* ================= Diálogos dentro de la página (no dependen de prompt/alert/confirm del navegador) ================= */
+let _tt;
+function toast(m){const t=$('#toast')||(()=>{const d=document.createElement('div');d.id='toast';document.body.appendChild(d);return d;})();t.textContent=String(m);t.style.display='block';clearTimeout(_tt);_tt=setTimeout(()=>t.style.display='none',6500);}
+window.alert=m=>toast(m);
+function dlg({title='',msg='',kind='text',type='text',value='',choices=[],ok='Aceptar',cancel='Cancelar',noCancel=false}){
+ return new Promise(res=>{
+  const o=document.createElement('div');o.className='ov';
+  const inp=kind==='text'?`<input id="dgi" type="${type}" value="${esc(value)}" autocomplete="off">`:'';
+  const chs=kind==='choice'?choices.map((c,i)=>`<label class="ch"><input type="radio" name="dgc" value="${i}"> ${esc(c.l)}</label>`).join(''):'';
+  o.innerHTML=`<div class="dg" role="dialog"><h3>${esc(title)}</h3><p>${esc(msg)}</p>${inp}${chs}<div class="row" style="justify-content:flex-end;margin-top:12px">${noCancel?'':`<button class="s" id="dgx">${esc(cancel)}</button>`}<button class="b" id="dgo">${esc(ok)}</button></div></div>`;
+  document.body.appendChild(o);
+  const close=v=>{o.remove();document.removeEventListener('keydown',kd,true);res(v);};
+  const done=()=>{if(kind==='text')return close($('#dgi').value);if(kind==='choice'){const s=o.querySelector('input[name=dgc]:checked');if(!s){toast('Elige una opción.');return;}return close(choices[+s.value].v);}close(true);};
+  const kd=e=>{if(e.key==='Escape'&&!noCancel){e.preventDefault();close(kind==='confirm'?false:null);}if(e.key==='Enter'&&kind!=='choice'){e.preventDefault();done();}};
+  document.addEventListener('keydown',kd,true);
+  o.querySelector('#dgo').onclick=done;const x=o.querySelector('#dgx');if(x)x.onclick=()=>close(kind==='confirm'?false:null);
+  const f=o.querySelector('#dgi');if(f)setTimeout(()=>f.focus(),30);
+ });
+}
+const askText=(msg,o={})=>dlg({kind:'text',msg,...o});
+const askConfirm=(msg,o={})=>dlg({kind:'confirm',msg,title:o.title||'Confirmar',...o});
+const askChoice=(msg,choices,o={})=>dlg({kind:'choice',msg,choices,...o});
+const askInfo=(msg,o={})=>dlg({kind:'confirm',msg,noCancel:true,...o});
+const L6DOCS=[{v:'Cédula',l:'Cédula (mujer ≥55 años / hombre ≥60)'},{v:'Carné jubilado/pensionado',l:'Carné de jubilado o pensionado'}];
+
+/* ================= PIN de autorización (Nivel B) ================= */
+async function authorize(action){
+ if(!db.sec){
+  const p=await askText('Crea el PIN de autorización del propietario (mínimo 6 caracteres). Es distinto de tu contraseña.',{type:'password',title:'Crear PIN de autorización'});
+  if(!p||p.length<6){alert('PIN no creado.');return false;}
+  const salt=uid('S'),rk=Math.random().toString(16).slice(2,10)+Math.random().toString(16).slice(2,10);
+  db.sec={salt,hash:await sha(salt+p),rhash:await sha(salt+rk),fails:0,locked:false};save();
+  await askInfo('Guarda esta clave de recuperación fuera de la computadora. Solo se muestra una vez:\n\n'+rk,{title:'Clave de recuperación'});log('SEC_PIN_CREADO','');
+ }
+ if(db.sec.locked){
+  const rk=await askText('Autorizaciones BLOQUEADAS. Ingresa la clave de recuperación del propietario.',{type:'password',title:'Desbloqueo'});
+  if(rk&&await sha(db.sec.salt+rk)===db.sec.rhash){db.sec.locked=false;db.sec.fails=0;save();log('SEC_DESBLOQUEO','recuperación');}
+  else{log('SEC_RECUPERACION_FALLIDA','');alert('Recuperación incorrecta.');return false;}
+ }
+ const p=await askText('Esta operación modifica datos protegidos. Ingresa el PIN del propietario.',{type:'password',title:'Autorización requerida: '+action});
+ if(p===null)return false;
+ if(await sha(db.sec.salt+p)===db.sec.hash){db.sec.fails=0;save();log('AUTORIZACION_OK',action);return true;}
+ db.sec.fails++;log('AUTORIZACION_FALLIDA','intento '+db.sec.fails+' — '+action);
+ if(db.sec.fails>=3){db.sec.locked=true;log('SEC_BLOQUEO','3 intentos fallidos');alert('3 intentos fallidos: autorizaciones bloqueadas.');}
+ else alert('PIN incorrecto. Intentos restantes: '+(3-db.sec.fails));
+ save();return false;
+}
+
+/* ================= Inventario: recetas y movimientos ================= */
+const unitCost=p=>p.recipe&&p.recipe.length?r2(p.recipe.reduce((a,i)=>a+((prod(i.pid)||{cost:0}).cost*i.qty),0)):p.cost;
+const avail=p=>p.recipe&&p.recipe.length?Math.floor(Math.min(...p.recipe.map(i=>(prod(i.pid)||{stock:0}).stock/i.qty))+1e-9):p.stock;
+function needs(p,q,map){if(p.recipe&&p.recipe.length)p.recipe.forEach(i=>needs(prod(i.pid),q*i.qty,map));else map[p.id]=(map[p.id]||0)+q;}
+function move(p,q,type,ref,why){
+ if(p.recipe&&p.recipe.length){p.recipe.forEach(i=>move(prod(i.pid),q*i.qty,type+' (receta '+p.name+')',ref,why));return;}
+ p.stock=Math.round((p.stock+q)*1000)/1000;db.moves.push({t:now(),u:user(),pid:p.id,name:p.name,q:Math.round(q*1000)/1000,type,ref:ref||'',why:why||''});
+}
+
+/* ================= Cálculo de venta ================= */
+function calcSale(cart,jubi,type){
+ const L6=db.ley6;let sub=0,disc=0,tax_=0;
+ const lines=cart.map(c=>{const p=prod(c.pid),gross=r2(p.price*c.qty);
+  const ap=jubi&&c.benef&&p.ley6&&type!=='domicilio';
+  const d=ap?r2(gross*L6.rest/100):0,base=r2(gross-d),rate=tax(p.tax).rate,t=r2(base*rate/100);
+  sub+=gross;disc+=d;tax_+=t;
+  return{pid:p.id,name:p.name,qty:c.qty,price:p.price,gross,disc:d,base,rate,tax:t,total:r2(base+t),cost:r2(unitCost(p)*c.qty),benef:!!ap};});
+ return{lines,sub:r2(sub),disc:r2(disc),tax:r2(tax_),total:r2(sub-disc+tax_)};
+}
+
+/* ================= POS ================= */
+let cart=[],jubi=null,otype='local',q='',pays=[{m:'Efectivo',amt:0,rec:0,ref:'',conf:true}];
+try{const d=JSON.parse(localStorage.getItem(KEY+'_draft')||'null');if(d&&Array.isArray(d.cart)){const c=d.cart.filter(x=>prod(x.pid));if(c.length){cart=c;jubi=d.jubi||null;otype=d.otype||'local';if(d.pays&&d.pays.length)pays=d.pays;window._draftRestored=true;}}}catch(e){}
+function vPos(){
+ try{localStorage.setItem(KEY+'_draft',JSON.stringify({cart,jubi,otype,pays}));}catch(e){}
+ const ps=db.products.filter(p=>p.active!==false&&(!q||(p.name+p.code).toLowerCase().includes(q.toLowerCase())));
+ const c=calcSale(cart,!!jubi,otype);
+ $('#app').innerHTML=`
+ ${db.cur?'':'<div class="warn red">No hay caja abierta. Abre la caja en la sección Caja para poder cobrar.</div>'}
+ <div class="grid g2"><div class="card">
+  <div class="row"><input id="q" placeholder="Buscar por nombre o código (Enter agrega por código)" value="${esc(q)}" style="flex:1"></div>
+  <div class="prods">${ps.map(p=>`<button onclick="addP('${p.id}')"><b>${esc(p.name)}</b><br>${M(p.price)}<br><small>Disp. ${avail(p)}</small></button>`).join('')||'Sin resultados'}</div>
+ </div><div class="card">
+  <div class="row"><label>Tipo:</label><select onchange="otype=this.value;render()">${['local','llevar','domicilio'].map(t=>`<option ${t===otype?'selected':''}>${t}</option>`).join('')}</select>
+  <input id="code" placeholder="Código (jubi)" size="10" onkeydown="if(event.key==='Enter')applyCode()"><button class="s" onclick="applyCode()">Aplicar</button></div>
+  ${jubi?`<div class="tag">Ley 6 jubilado: ${esc(jubi.doc)} — verificado por ${esc(jubi.by)} <a href="#" onclick="jubi=null;render();return false">quitar</a></div>`:''}
+  ${ley6Warn(c)}
+  ${jubi&&c.disc>0?`<div class="tag" style="background:#d6efdc">Descuento Ley 6 aplicado: -${M(c.disc)}</div>`:''}
+  ${jubi&&otype==='domicilio'?'<div class="warn">El descuento de jubilados NO aplica a pedidos a domicilio.</div>':''}
+  <table><tr><th>Producto</th><th class="n">Cant</th><th class="n">Importe</th>${jubi?'<th>Benef.</th>':''}<th></th></tr>
+  ${c.lines.map((l,i)=>`<tr><td>${esc(l.name)}<br><small>${M(l.price)}${l.disc?` · desc ${M(l.disc)}`:''}</small></td>
+   <td class="n"><input type="number" min="1" value="${l.qty}" style="width:60px" onchange="setQ(${i},this.value)"></td><td class="n">${M(l.gross)}</td>
+   ${jubi?`<td><input type="checkbox" ${cart[i].benef?'checked':''} onchange="cart[${i}].benef=this.checked;render()"></td>`:''}
+   <td><button class="d" onclick="cart.splice(${i},1);render()">✕</button></td></tr>`).join('')||'<tr><td colspan="5">Carrito vacío</td></tr>'}</table>
+  <div class="row">Subtotal <b>${M(c.sub)}</b> · Descuentos <b>${M(c.disc)}</b> · ITBMS <b>${M(c.tax)}</b></div>
+  <div class="tot">Total: ${M(c.total)}</div>
+  ${pays.map((p,i)=>`<div class="row"><select onchange="pays[${i}].m=this.value;pays[${i}].conf=this.value==='Efectivo';render()">${['Efectivo','Yappy','Tarjeta'].map(m=>`<option ${m===p.m?'selected':''}>${m}</option>`).join('')}</select>
+   <input type="number" step="0.01" placeholder="Importe" value="${p.amt||''}" style="width:90px" onchange="pays[${i}].amt=+this.value;render()">
+   ${p.m==='Efectivo'?`<input type="number" step="0.01" placeholder="Recibido" value="${p.rec||''}" style="width:90px" onchange="pays[${i}].rec=+this.value;render()"> <span>Cambio ${M(Math.max(0,r2((p.rec||0)-(p.amt||0))))}</span>`:
+   `<input placeholder="Referencia" value="${esc(p.ref)}" style="width:110px" onchange="pays[${i}].ref=this.value"><label><input type="checkbox" ${p.conf?'checked':''} onchange="pays[${i}].conf=this.checked"> confirmado</label>`}
+   ${pays.length>1?`<button class="d" onclick="pays.splice(${i},1);render()">✕</button>`:''}</div>`).join('')}
+  <div class="row"><button class="s" onclick="pays.push({m:'Yappy',amt:0,rec:0,ref:'',conf:false});render()">+ Pago mixto</button><button class="s" onclick="fillRest()">Completar pendiente</button>
+  <span>Pendiente: <b>${M(r2(c.total-pays.reduce((a,p)=>a+(p.amt||0),0)))}</b></span></div>
+  <div class="row"><button class="b" style="font-size:18px;flex:1" onclick="checkout()">COBRAR</button><button class="s" onclick="resetPos()">Limpiar</button></div>
+ </div></div>`;
+ const qi=$('#q');if(qi){qi.oninput=e=>{q=e.target.value;};qi.onkeydown=e=>{if(e.key==='Enter'){const m=db.products.find(p=>p.code===q.trim()&&p.active!==false);if(m){addP(m.id);q='';}else render();}};}
+}
+function ley6Warn(c){
+ if(!jubi||!cart.length||otype==='domicilio'||c.disc>0)return '';
+ const m=[];
+ if(!(db.ley6.rest>0))m.push(`El porcentaje de cafetería en Configuración es ${db.ley6.rest}%. ${me&&me.role==='Propietario'?'<button class="s" onclick="fixRest()">Poner 25 %</button>':'Pide al propietario que lo corrija en Configuración.'}`);
+ const nf=[...new Set(cart.filter(x=>!prod(x.pid).ley6).map(x=>x.pid))];
+ nf.forEach(id=>m.push(`<b>${esc(prod(id).name)}</b> está marcado como "NO aplica Ley 6". ${isAdm()?`<button class="s" onclick="setLey6('${id}')">Activar Ley 6 en este producto</button>`:'Pide a un administrador que lo active en Inventario.'}`));
+ if(cart.some(x=>!x.benef))m.push('Hay líneas sin marcar en "Benef.": marca las que consume el jubilado.');
+ if(!m.length)m.push('Ninguna línea califica. Revisa "Benef." y "Aplica Ley 6".');
+ return '<div class="warn red"><b>El descuento no se está aplicando:</b><br>'+m.join('<br>')+'</div>';
+}
+function setLey6(id){const p=prod(id);p.ley6=true;log('PRODUCTO_LEY6',p.name+' → aplica Ley 6');save();render();toast('Ley 6 activada en '+p.name);}
+async function fixRest(){if(!await authorize('Cambiar descuento Ley 6 cafetería'))return;const o=db.ley6.rest;db.ley6.rest=25;log('CFG_LEY6','cafetería '+o+' → 25');save();render();}
+const resetPos=()=>{cart=[];jubi=null;pays=[{m:'Efectivo',amt:0,rec:0,ref:'',conf:true}];render();};
+function fillRest(){const c=calcSale(cart,!!jubi,otype),rest=r2(c.total-pays.slice(0,-1).reduce((a,p)=>a+(p.amt||0),0));const l=pays[pays.length-1];l.amt=rest;if(l.m==='Efectivo'&&!l.rec)l.rec=rest;render();}
+function addP(id){const l=cart.find(c=>c.pid===id);l?l.qty++:cart.push({pid:id,qty:1,benef:true});render();}
+function setQ(i,v){v=parseInt(v);if(v>0)cart[i].qty=v;render();}
+async function applyCode(){
+ const v=$('#code').value.trim().toLowerCase();if(!v)return toast('Escribe el código (jubi).');
+ if(v!==db.ley6.code.toLowerCase())return toast('Código no válido.');
+ if(!cart.length)return toast('Primero agrega los productos al carrito.');
+ const doc=await askChoice('Elige el documento que verificaste del beneficiario:',L6DOCS,{title:'Verificar beneficiario (Ley 6)',ok:'Aplicar descuento'});
+ if(!doc)return toast('Verificación requerida: no se aplicó el descuento.');
+ jubi={doc,by:user()};log('LEY6_APLICADO','POS '+doc);render();
+ const c=calcSale(cart,true,otype);toast(c.disc>0?'Descuento Ley 6 aplicado: -'+M(c.disc):'Código aceptado, pero ninguna línea califica (revisa "Benef." y "Aplica Ley 6").');
+}
+function checkout(){
+ if(!db.cur)return alert('Abre la caja primero.');
+ if(!cart.length)return alert('Carrito vacío.');
+ const c=calcSale(cart,!!jubi,otype),need={};
+ cart.forEach(x=>needs(prod(x.pid),x.qty,need));
+ for(const id in need){if(prod(id).stock<need[id]-1e-9)return alert('Stock insuficiente de '+prod(id).name);}
+ const sum=r2(pays.reduce((a,p)=>a+(+p.amt||0),0));
+ if(sum!==c.total)return alert('La suma de pagos ('+M(sum)+') debe ser igual al total ('+M(c.total)+').');
+ for(const p of pays){if(p.m==='Efectivo'&&(p.rec||0)<p.amt)return alert('Efectivo recibido menor al importe.');}
+ const key=JSON.stringify([cart,pays,Math.floor(Date.now()/3000)]);
+ if(window._lastKey===key)return alert('Venta duplicada bloqueada.');window._lastKey=key;
+ const s={id:uid('V'),t:now(),d:today(),user:user(),sesion:db.cur.id,type:otype,ley6:jubi,...c,
+  pays:pays.map(p=>({m:p.m,amt:r2(+p.amt),rec:p.m==='Efectivo'?+p.rec:null,change:p.m==='Efectivo'?r2(p.rec-p.amt):null,ref:p.ref,estado:p.conf?'confirmado':'pendiente'})),status:'cerrada'};
+ cart.forEach(x=>move(prod(x.pid),-x.qty,'Venta',s.id));
+ db.sales.push(s);log('VENTA',s.id+' '+M(s.total));save();
+ resetPos();printSale(s);
+}
+function printSale(s){
+ const w=window.open('','_blank','width=380,height=640');if(!w)return alert('Permite ventanas emergentes para imprimir.');
+ w.document.write(`<pre style="font:13px monospace">THE GARDEN HOUSE BOQUETE
+*** COMPROBANTE INTERNO — NO FISCAL ***
+${s.id}  ${s.t}
+Cajero: ${esc(s.user)}   Tipo: ${s.type}
+--------------------------------
+${s.lines.map(l=>`${l.qty} x ${esc(l.name)}\n     ${M(l.gross)}${l.disc?`  (Ley6 -${M(l.disc)})`:''}`).join('\n')}
+--------------------------------
+Subtotal:    ${M(s.sub)}
+Descuentos:  ${M(s.disc)}${s.ley6?'  [Ley 6 jubilado]':''}
+ITBMS:       ${M(s.tax)}
+TOTAL:       ${M(s.total)}
+${s.pays.map(p=>`${p.m}: ${M(p.amt)} (${p.estado})${p.change!=null?' cambio '+M(p.change):''}`).join('\n')}
+</pre><script>print()<\/script>`);w.document.close();
+}
+
+/* ================= Caja ================= */
+function vCaja(){
+ const cur=db.cur;let h='';
+ if(!cur)h=`<div class="card"><h3>Apertura de caja</h3><div class="row"><input id="fondo" type="number" step="0.01" placeholder="Fondo inicial"><button class="b" onclick="abrir()">Abrir caja</button></div></div>`;
+ else{const e=expected(cur);h=`<div class="card"><h3>Caja abierta</h3><p>Abierta: ${cur.t} por ${esc(cur.user)} · Fondo ${M(cur.fondo)}</p>
+ <table><tr><td>Ventas efectivo</td><td class="n">${M(e.cash)}</td></tr><tr><td>Yappy</td><td class="n">${M(e.yappy)}</td></tr><tr><td>Tarjeta</td><td class="n">${M(e.card)}</td></tr>
+ <tr><td>Devoluciones en efectivo</td><td class="n">-${M(e.refunds)}</td></tr><tr><td>Retiros / entradas</td><td class="n">${M(e.mov)}</td></tr>
+ <tr><th>Efectivo esperado</th><th class="n">${M(e.expected)}</th></tr></table>
+ <div class="row"><input id="mv" type="number" step="0.01" placeholder="Monto (+entrada / −retiro)"><input id="mvr" placeholder="Motivo"><button class="s" onclick="mov()">Registrar movimiento</button></div>
+ <h4>Cierre</h4><div class="row"><input id="cont" type="number" step="0.01" placeholder="Efectivo contado"><input id="mot" placeholder="Motivo de diferencia"><button class="b" onclick="cerrar()">Cerrar caja</button></div></div>`;}
+ h+=`<div class="card"><h3>Cierres (inmutables)</h3><table><tr><th>Cierre</th><th>Usuario</th><th class="n">Esperado</th><th class="n">Contado</th><th class="n">Diferencia</th><th>Motivo</th></tr>
+ ${[...db.sessions].reverse().map(s=>`<tr><td>${s.cierre}</td><td>${esc(s.user)}</td><td class="n">${M(s.esperado)}</td><td class="n">${M(s.contado)}</td><td class="n ${s.dif?'red':''}">${M(s.dif)}</td><td>${esc(s.motivo)}</td></tr>`).join('')||'<tr><td colspan="6">Sin cierres</td></tr>'}</table></div>`;
+ $('#app').innerHTML=h;
+}
+function expected(cur){
+ let cash=0,yappy=0,card=0;
+ db.sales.filter(s=>s.sesion===cur.id).forEach(s=>s.pays.forEach(p=>{if(p.m==='Efectivo')cash+=p.amt;else if(p.m==='Yappy')yappy+=p.amt;else card+=p.amt;}));
+ const refunds=db.returns.filter(r=>r.sesion===cur.id&&r.metodo==='Efectivo').reduce((a,r)=>a+r.monto,0);
+ const mov=(cur.movs||[]).reduce((a,m)=>a+m.monto,0);
+ return{cash:r2(cash),yappy:r2(yappy),card:r2(card),refunds:r2(refunds),mov:r2(mov),expected:r2(cur.fondo+cash-refunds+mov)};
+}
+function abrir(){const f=+$('#fondo').value;if(f<0||isNaN(f)||$('#fondo').value==='')return alert('Fondo inválido');db.cur={id:uid('C'),t:now(),user:user(),fondo:r2(f),movs:[]};log('CAJA_APERTURA',M(f));save();render();}
+function mov(){const m=+$('#mv').value,r=$('#mvr').value.trim();if(!m||!r)return alert('Monto y motivo requeridos');db.cur.movs.push({t:now(),monto:r2(m),motivo:r,user:user()});log('CAJA_MOVIMIENTO',M(m)+' '+r);save();render();}
+async function cerrar(){
+ const c=+$('#cont').value;if(isNaN(c)||$('#cont').value==='')return alert('Ingresa efectivo contado');
+ const e=expected(db.cur),dif=r2(c-e.expected),mot=$('#mot').value.trim();
+ if(dif!==0&&!mot)return alert('Indica el motivo de la diferencia.');
+ if(!await askConfirm('El cierre no se puede modificar después.\nDiferencia: '+M(dif),{title:'Cerrar caja',ok:'Cerrar caja'}))return;
+ db.sessions.push({id:db.cur.id,abierta:db.cur.t,cierre:now(),user:user(),fondo:db.cur.fondo,esperado:e.expected,contado:r2(c),dif,motivo:mot});
+ log('CAJA_CIERRE','dif '+M(dif));db.cur=null;save();render();downloadBackup();
+}
+
+/* ================= Ventas / devoluciones ================= */
+function vHist(){
+ $('#app').innerHTML=`<div class="card"><h3>Historial de ventas</h3><div style="overflow:auto"><table><tr><th>Nº</th><th>Fecha</th><th>Usuario</th><th class="n">Total</th><th>Pagos</th><th>Estado</th><th></th></tr>
+ ${[...db.sales].reverse().map(s=>`<tr><td>${s.id}</td><td>${s.t}</td><td>${esc(s.user)}</td><td class="n">${M(s.total)}</td>
+ <td>${s.pays.map((p,i)=>p.m+' '+M(p.amt)+(p.estado==='pendiente'?` <a href="#" onclick="confPay('${s.id}',${i});return false">⏳confirmar</a>`:'')).join('<br>')}</td><td>${s.status}${s.ley6?' <span class="tag">Ley6</span>':''}</td>
+ <td><button class="s" onclick="printSale(db.sales.find(x=>x.id==='${s.id}'));log('REIMPRESION','${s.id}')">Reimprimir</button> <button class="s" onclick="devol('${s.id}')">Devolver</button></td></tr>`).join('')||'<tr><td colspan="7">Sin ventas</td></tr>'}</table></div>
+ <div id="dv"></div></div>`;
+}
+async function confPay(id,i){const p=db.sales.find(s=>s.id===id).pays[i];const ref=await askText('Referencia o evidencia de la transacción '+p.m+' (obligatoria).',{value:p.ref||'',title:'Confirmar pago'});if(!ref||!ref.trim())return toast('Se requiere una referencia para confirmar.');p.ref=ref;p.estado='confirmado';log('PAGO_CONFIRMADO',id+' '+p.m+' '+ref);save();render();}
+function devol(id){
+ const s=db.sales.find(x=>x.id===id),prev=db.returns.filter(r=>r.venta===id);
+ $('#dv').innerHTML=`<h4>Devolución de ${id}</h4><table><tr><th>Producto</th><th>Vendido</th><th>Devolver</th></tr>
+ ${s.lines.map((l,i)=>{const ya=prev.reduce((a,r)=>a+(r.lines.find(x=>x.pid===l.pid)?.qty||0),0);return`<tr><td>${esc(l.name)}</td><td>${l.qty} (ya dev. ${ya})</td><td><input type="number" min="0" max="${l.qty-ya}" value="0" id="rq${i}" style="width:60px"></td></tr>`;}).join('')}</table>
+ <div class="row"><input id="rm" placeholder="Motivo"><select id="rmet"><option>Efectivo</option><option>Yappy</option><option>Tarjeta</option></select><button class="b" onclick="doDevol('${id}')">Registrar (requiere PIN)</button></div>`;
+}
+async function doDevol(id){
+ if(!db.cur)return alert('Abre la caja para registrar la devolución.');
+ const s=db.sales.find(x=>x.id===id),mot=$('#rm').value.trim();if(!mot)return alert('Motivo requerido');
+ const prev=db.returns.filter(r=>r.venta===id);let monto=0,base=0,cost=0;const lines=[];
+ for(let i=0;i<s.lines.length;i++){const l=s.lines[i];const qn=parseInt($('#rq'+i).value)||0;const ya=prev.reduce((a,r)=>a+(r.lines.find(x=>x.pid===l.pid)?.qty||0),0);
+  if(qn>l.qty-ya||qn<0)return alert('Cantidad inválida en '+l.name);
+  if(qn>0){monto+=l.total*qn/l.qty;base+=l.base*qn/l.qty;cost+=(l.cost||0)*qn/l.qty;lines.push({pid:l.pid,qty:qn});}}
+ if(!lines.length)return alert('Nada que devolver');
+ if(!await authorize('Devolución '+id))return;
+ lines.forEach(l=>move(prod(l.pid),l.qty,'Devolución',id,mot));
+ db.returns.push({id:uid('D'),venta:id,t:now(),d:today(),user:user(),motivo:mot,metodo:$('#rmet').value,monto:r2(monto),base:r2(base),cost:r2(cost),lines,sesion:db.cur.id});
+ s.status='con devolución';log('DEVOLUCION',id+' '+M(monto)+' '+mot);save();alert('Devolución registrada: '+M(monto));render();
+}
+
+/* ================= Hostal ================= */
+const roomRate=(room,d)=>{const s=(room.seasons||[]).find(x=>x.from<=d&&d<=x.to);return s?s.rate:room.rate;};
+function nightsOf(r){const out=[];let d=r.in;while(d<r.out){out.push(d);d=addDays(d,1);}return out;}
+function resCalc(r){
+ const L=db.ley6,ns=nightsOf(r);let sub=0,disc=0;
+ const rows=ns.map(n=>{const rate=(r.nightRates&&r.nightRates[n]!==undefined)?r.nightRates[n]:r.rate,dow=new Date(n+'T12:00:00').getDay(),pct=r.jubi?(L.weekDays.includes(dow)?L.hotelWeek:L.hotelWeekend):0,d=r2(rate*pct/100);sub+=rate;disc+=d;return{n,rate,pct,d};});
+ const base=r2(sub-disc),tx=r2(base*tax('ALOJ').rate/100);
+ const extras=r2((r.extras||[]).reduce((a,x)=>a+x.monto,0)),extrasTax=r2((r.extras||[]).reduce((a,x)=>a+r2(x.monto*tax(x.tax||'EXE').rate/100),0));
+ const total=r2(base+tx+extras+extrasTax),paid=r2((r.pays||[]).reduce((a,p)=>a+p.monto,0));
+ return{rows,sub:r2(sub),disc:r2(disc),base,tax:tx,extras,extrasTax,total,paid,balance:r2(total-paid)};
+}
+const ST=['consulta','pendiente de confirmación','confirmada','alojado','completada','cancelada','no presentado'];
+const DEAD=['cancelada','no presentado'];
+let calStart=today(),er=null;
+function vHostal(){
+ const days=[...Array(14)].map((_,i)=>addDays(calStart,i));
+ const act=db.rooms.filter(r=>r.active&&r.estado!=='fuera de servicio');
+ $('#app').innerHTML=`<div class="card"><h3>Nueva reserva</h3><div class="row">
+  <input id="hg" placeholder="Huésped"><input id="hc" placeholder="Contacto"><select id="hr">${act.map(r=>`<option value="${r.id}">${esc(r.name)} · ${M(r.rate)}</option>`).join('')}</select>
+  <label>Llegada <input id="hi" type="date" value="${today()}"></label><label>Salida <input id="ho" type="date"></label>
+  <input id="hn" type="number" min="1" value="1" style="width:70px" title="Huéspedes"><input id="hrt" type="number" step="0.01" placeholder="Tarifa/noche (opcional)" style="width:150px">
+  <input id="hd" type="number" step="0.01" placeholder="Depósito" style="width:100px"><select id="hm"><option>Efectivo</option><option>Yappy</option><option>Tarjeta</option></select>
+  <label><input type="checkbox" id="hj"> Jubilado/pensionado (Ley 6)</label><button class="b" onclick="newRes()">Crear</button></div>
+  <small>Si dejas la tarifa vacía se usa la de la habitación (o la de temporada).</small></div>
+ <div class="card"><h3>Calendario de ocupación</h3><div class="row"><input type="date" value="${calStart}" onchange="calStart=this.value;render()"></div>
+ <div style="overflow:auto"><table class="cal"><tr><th>Hab.</th>${days.map(d=>`<th>${d.slice(5)}</th>`).join('')}</tr>
+ ${db.rooms.filter(r=>r.active).map(r=>`<tr><th>${r.id}${r.estado==='fuera de servicio'?' ⛔':''}</th>${days.map(d=>{const x=db.res.find(y=>y.room===r.id&&!DEAD.includes(y.status)&&d>=y.in&&d<y.out);return`<td class="${x?(x.status==='alojado'?'occ':'res'):''}">${x?esc(x.guest.split(' ')[0]):''}</td>`;}).join('')}</tr>`).join('')}</table></div></div>
+ ${isAdm()?roomsPanel():''}
+ <div class="card"><h3>Reservas</h3>${[...db.res].reverse().map(r=>{const c=resCalc(r);return`<div class="card"><b>${r.id}</b> — ${esc(r.guest)} · ${r.room} · ${r.in} → ${r.out} (${c.rows.length} noches) ${r.jubi?`<span class="tag">Ley 6 · ${esc(r.jubiDoc||'')}</span>`:''}
+ <div class="row"><select onchange="setSt('${r.id}',this.value)">${ST.map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}</select>
+ <input id="px${r.id}" type="number" step="0.01" placeholder="Pago" style="width:90px"><select id="pm${r.id}"><option>Efectivo</option><option>Yappy</option><option>Tarjeta</option></select><button class="s" onclick="payRes('${r.id}')">Registrar pago</button></div>
+ <div class="row"><input id="ex${r.id}" placeholder="Servicio/cargo extra" style="width:150px"><input id="ev${r.id}" type="number" step="0.01" placeholder="$ sin imp." style="width:90px"><select id="et${r.id}">${db.taxes.map(t=>`<option value="${t.id}" ${t.id==='GRAV'?'selected':''}>${t.id} ${t.rate}%</option>`).join('')}</select><button class="s" onclick="extra('${r.id}')">+ Cargo</button>
+ <button class="s" onclick="chgRate('${r.id}')">Cambiar tarifa (PIN)</button><button class="s" onclick="printRes('${r.id}')">Imprimir cuenta</button></div>
+ <table><tr><th>Noche</th><th class="n">Tarifa</th><th class="n">Desc.</th></tr>${c.rows.map(n=>`<tr><td>${n.n}</td><td class="n">${M(n.rate)}</td><td class="n">${n.pct?n.pct+'% = '+M(n.d):'—'}</td></tr>`).join('')}</table>
+ <p>Alojamiento ${M(c.sub)} · Descuentos −${M(c.disc)} · Base ${M(c.base)} · ITBMS hospedaje ${M(c.tax)} · Extras ${M(c.extras)} (+imp. ${M(c.extrasTax)})<br><b>Total ${M(c.total)}</b> · Pagado ${M(c.paid)} (${(r.pays||[]).map(p=>p.m+' '+M(p.monto)).join(', ')||'—'}) · <b class="${c.balance>0?'red':'ok'}">Saldo ${M(c.balance)}</b></p></div>`;}).join('')||'Sin reservas'}</div>`;
+}
+function roomsPanel(){
+ const f=er;
+ return `<div class="card"><h3>Habitaciones y tarifas</h3><table><tr><th>Cód.</th><th>Nombre</th><th class="n">Cap.</th><th class="n">Tarifa base</th><th>Estado</th><th>Temporadas</th><th></th></tr>
+ ${db.rooms.map(r=>`<tr><td>${esc(r.id)}</td><td>${esc(r.name)}${r.active?'':' <span class="tag">inactiva</span>'}</td><td class="n">${r.cap}</td><td class="n">${M(r.rate)}</td><td>${r.estado}</td><td>${(r.seasons||[]).map(s=>`${s.from}→${s.to}: ${M(s.rate)}`).join('<br>')||'—'}</td><td><button class="s" onclick="editRoom('${r.id}')">Editar</button></td></tr>`).join('')}</table>
+ <div class="row"><button class="b" onclick="editRoom(null)">+ Nueva habitación</button></div>
+ ${f?`<div class="card"><h4>${f.isNew?'Nueva':'Editar'} habitación</h4><div class="row">
+  <input placeholder="Código" value="${esc(f.id)}" ${f.isNew?'':'disabled'} oninput="er.id=this.value.trim()" style="width:90px"><input placeholder="Nombre" value="${esc(f.name)}" oninput="er.name=this.value">
+  <label>Capacidad <input type="number" min="1" value="${f.cap}" oninput="er.cap=+this.value" style="width:70px"></label><label>Tarifa base $ <input type="number" step="0.01" value="${f.rate}" oninput="er.rate=+this.value" style="width:90px"></label>
+  <select onchange="er.estado=this.value">${['disponible','en limpieza','fuera de servicio'].map(s=>`<option ${s===f.estado?'selected':''}>${s}</option>`).join('')}</select>
+  <label><input type="checkbox" ${f.active?'checked':''} onchange="er.active=this.checked"> activa</label></div>
+  <h4>Tarifas por temporada</h4>${f.seasons.map((s,i)=>`<div class="row">${s.from} → ${s.to}: ${M(s.rate)} <button class="d" onclick="er.seasons.splice(${i},1);render()">✕</button></div>`).join('')}
+  <div class="row"><input type="date" id="sf"><input type="date" id="st"><input type="number" step="0.01" id="sr" placeholder="Tarifa $" style="width:100px"><button class="s" onclick="addSeason()">+ Temporada</button></div>
+  <div class="row"><button class="b" onclick="saveRoom()">Guardar habitación</button><button class="s" onclick="er=null;render()">Cancelar</button></div></div>`:''}</div>`;
+}
+function editRoom(id){er=id?JSON.parse(JSON.stringify(db.rooms.find(r=>r.id===id))):{id:'',name:'',cap:2,rate:0,estado:'disponible',seasons:[],active:true,isNew:true};render();}
+function addSeason(){const f=$('#sf').value,t=$('#st').value,r=+$('#sr').value;if(!f||!t||t<f||!(r>=0)||$('#sr').value==='')return alert('Fechas y tarifa válidas.');er.seasons.push({from:f,to:t,rate:r2(r)});render();}
+function saveRoom(){
+ if(!er.id||!er.name)return alert('Código y nombre requeridos.');if(!(er.cap>0)||!(er.rate>=0))return alert('Capacidad y tarifa válidas.');
+ const i=db.rooms.findIndex(r=>r.id===er.id);const n={...er};delete n.isNew;
+ if(er.isNew){if(i>=0)return alert('Código ya existe.');db.rooms.push(n);log('HABITACION_NUEVA',n.id+' '+M(n.rate));}
+ else{const o=db.rooms[i];db.rooms[i]=n;log('HABITACION_EDITADA',n.id+' tarifa '+M(o.rate)+' → '+M(n.rate)+' estado '+o.estado+' → '+n.estado);}
+ er=null;save();render();
+}
+async function newRes(){
+ const room=db.rooms.find(x=>x.id===$('#hr').value);if(!room)return alert('No hay habitaciones disponibles.');
+ const r={id:uid('R'),guest:$('#hg').value.trim(),contact:$('#hc').value.trim(),room:room.id,in:$('#hi').value,out:$('#ho').value,n:+$('#hn').value,jubi:$('#hj').checked,status:'pendiente de confirmación',created:now(),extras:[],pays:[],nightRates:{}};
+ if(!r.guest||!r.in||!r.out||r.out<=r.in)return alert('Completa huésped y fechas válidas (salida posterior a llegada).');
+ if(r.n>room.cap)return alert('Excede la capacidad ('+room.cap+').');
+ const clash=db.res.find(y=>y.room===r.room&&!DEAD.includes(y.status)&&r.in<y.out&&r.out>y.in);
+ if(clash)return alert('Conflicto: la habitación ya está reservada ('+clash.id+', '+clash.in+' → '+clash.out+').');
+ const custom=$('#hrt').value;nightsOf(r).forEach(n=>r.nightRates[n]=custom!==''?r2(+custom):roomRate(room,n));r.rate=room.rate;
+ if(r.jubi){const doc=await askChoice('Elige el documento que verificaste del beneficiario:',L6DOCS,{title:'Verificar beneficiario (Ley 6)',ok:'Continuar'});if(!doc)return alert('Sin verificación no se aplica el descuento. La reserva no se creó.');r.jubiDoc=doc;}
+ const dep=+$('#hd').value;if(dep>0)r.pays.push({t:now(),d:today(),monto:r2(dep),m:$('#hm').value,tipo:'anticipo/depósito'});
+ db.res.push(r);log('RESERVA_CREADA',r.id+' '+r.guest+(r.jubi?' [Ley6]':''));save();render();
+}
+async function setSt(id,s){const r=db.res.find(x=>x.id===id);const old=r.status;
+ if(s==='completada'&&resCalc(r).balance>0&&!await askConfirm('Hay saldo pendiente. ¿Completar el check-out igualmente?',{title:'Saldo pendiente'})){render();return;}
+ r.status=s;if(s==='alojado')r.checkin=now();if(s==='completada')r.checkout=now();log('RESERVA_ESTADO',id+' '+old+' → '+s);save();render();}
+function payRes(id){const m=+$('#px'+id).value;if(!(m>0))return alert('Monto inválido');const r=db.res.find(x=>x.id===id);r.pays.push({t:now(),d:today(),monto:r2(m),m:$('#pm'+id).value,tipo:'pago'});log('RESERVA_PAGO',id+' '+M(m));save();render();}
+function extra(id){const d=$('#ex'+id).value.trim(),m=+$('#ev'+id).value;if(!d||!(m>0))return alert('Descripción y monto');db.res.find(x=>x.id===id).extras.push({d,monto:r2(m),tax:$('#et'+id).value});log('RESERVA_EXTRA',id+' '+d+' '+M(m));save();render();}
+async function chgRate(id){const r=db.res.find(x=>x.id===id);const v=await askText('Nueva tarifa por noche para TODAS las noches de '+id+'.',{type:'number',title:'Cambiar tarifa'});if(v===null||v===''||!(+v>=0))return;
+ if(!await authorize('Cambiar tarifa de reserva '+id))return;const old=JSON.stringify(r.nightRates);nightsOf(r).forEach(n=>r.nightRates[n]=r2(+v));log('RESERVA_TARIFA',id+' '+old+' → '+v);save();render();}
+function printRes(id){const r=db.res.find(x=>x.id===id),c=resCalc(r),w=window.open('','_blank','width=420,height=700');if(!w)return alert('Permite ventanas emergentes.');
+ w.document.write(`<pre style="font:13px monospace">THE GARDEN HOUSE BOQUETE
+*** CUENTA DEL HUÉSPED — NO FISCAL ***
+Reserva ${r.id}   Hab. ${r.room}
+Huésped: ${esc(r.guest)}
+${r.in} → ${r.out}  (${c.rows.length} noches)
+--------------------------------
+${c.rows.map(n=>`${n.n}  ${M(n.rate)}${n.pct?`  desc ${n.pct}% -${M(n.d)}`:''}`).join('\n')}
+Alojamiento:    ${M(c.sub)}
+Descuentos:    -${M(c.disc)}${r.jubi?' [Ley 6]':''}
+Base imponible: ${M(c.base)}
+ITBMS hosped.:  ${M(c.tax)}
+${(r.extras||[]).map(x=>`Extra ${esc(x.d)}: ${M(x.monto)}`).join('\n')}
+Imp. extras:    ${M(c.extrasTax)}
+TOTAL:          ${M(c.total)}
+Pagos: ${(r.pays||[]).map(p=>p.m+' '+M(p.monto)).join(', ')||'—'}
+Pagado:         ${M(c.paid)}
+SALDO:          ${M(c.balance)}
+</pre><script>print()<\/script>`);w.document.close();}
+
+/* ================= Inventario / Productos / Recetas ================= */
+let ed=null;
+function vInv(){
+ const f=ed;const low=db.products.filter(p=>p.active!==false&&avail(p)<=p.min);
+ const soon=db.products.filter(p=>p.vence&&p.vence<=addDays(today(),30));
+ $('#app').innerHTML=`${low.length?`<div class="warn red">⚠ Bajo mínimo: ${low.map(p=>esc(p.name)).join(', ')}</div>`:''}${soon.length?`<div class="warn red">⏰ Vencen en ≤30 días o vencidos: ${soon.map(p=>esc(p.name)+' ('+p.vence+')').join(', ')}</div>`:''}
+ <div class="card"><h3>Productos e ingredientes</h3><div style="overflow:auto"><table><tr><th>Código</th><th>Producto</th><th>Cat.</th><th class="n">Costo</th><th class="n">Precio</th><th class="n">Margen</th><th class="n">Disp.</th><th class="n">Mín</th><th>Fiscal</th><th>Ley 6</th><th></th></tr>
+ ${db.products.map(p=>{const uc=unitCost(p),mg=p.price>0?Math.round((p.price-uc)/p.price*100):0;return`<tr><td>${esc(p.code)}</td><td>${esc(p.name)}${p.recipe&&p.recipe.length?' <span class="tag">receta</span>':''}${p.active===false?' <span class="tag">inactivo</span>':''}</td><td>${esc(p.cat)}</td><td class="n">${M(uc)}</td><td class="n">${M(p.price)}</td><td class="n">${mg}%</td><td class="n ${avail(p)<=p.min?'red':''}">${avail(p)}</td><td class="n">${p.min}</td><td>${p.tax}</td><td>${p.ley6?'sí':'no'}</td>
+ <td>${isAdm()?`<button class="s" onclick="editProd('${p.id}')">Editar</button>`:''}</td></tr>`;}).join('')}</table></div>
+ ${isAdm()?'<div class="row"><button class="b" onclick="editProd(null)">+ Nuevo producto</button></div>':''}
+ ${f?prodForm(f):''}</div>
+ <div class="card"><h3>Entrada / salida de inventario</h3><div class="row"><select id="mp">${db.products.filter(p=>!(p.recipe&&p.recipe.length)).map(p=>`<option value="${p.id}">${esc(p.name)} (${p.stock})</option>`).join('')}</select>
+ <select id="mt"><option value="in">Ingreso manual (+)</option><option>Merma</option><option>Vencido</option><option>Dañado</option><option>Consumo interno hostal</option><option>Cortesía</option><option>Ajuste (−)</option></select>
+ <input id="mq" type="number" step="any" min="0" placeholder="Cantidad" style="width:100px"><input id="mw" placeholder="Motivo" style="width:200px"><button class="b" onclick="movManual()">Registrar</button></div></div>
+ <div class="card"><h3>Movimientos recientes</h3><table><tr><th>Fecha</th><th>Usuario</th><th>Producto</th><th class="n">Cant.</th><th>Tipo</th><th>Ref./motivo</th></tr>
+ ${[...db.moves].reverse().slice(0,60).map(m=>`<tr><td>${m.t}</td><td>${esc(m.u)}</td><td>${esc(m.name)}</td><td class="n">${m.q}</td><td>${esc(m.type)}</td><td>${esc(m.ref)} ${esc(m.why)}</td></tr>`).join('')||'<tr><td colspan="6">Sin movimientos</td></tr>'}</table></div>`;
+}
+function prodForm(f){
+ const ing=db.products.filter(p=>p.id!==f.id&&!(p.recipe&&p.recipe.length));
+ const rc=f.recipe&&f.recipe.length?r2(f.recipe.reduce((a,i)=>a+((prod(i.pid)||{cost:0}).cost*i.qty),0)):null;
+ return `<div class="card"><h4>${f.isNew?'Nuevo':'Editar'} producto</h4><div class="row">
+ <input placeholder="Código / barras" value="${esc(f.code)}" oninput="ed.code=this.value.trim()"><input placeholder="Nombre" value="${esc(f.name)}" oninput="ed.name=this.value" style="width:220px"><input placeholder="Categoría" value="${esc(f.cat)}" oninput="ed.cat=this.value">
+ <label>Costo $ <input type="number" step="0.01" value="${f.cost}" oninput="ed.cost=+this.value" style="width:90px" ${rc!==null?'disabled title="Se calcula desde la receta"':''}></label>
+ <label>Precio venta $ <input type="number" step="0.01" value="${f.price}" oninput="ed.price=+this.value" style="width:90px"></label>
+ <label>Stock <input type="number" step="any" value="${f.stock}" oninput="ed.stock=+this.value" style="width:80px" ${f.isNew?'':'disabled title="Usa Entrada/salida de inventario"'}></label>
+ <label>Mínimo <input type="number" step="any" value="${f.min}" oninput="ed.min=+this.value" style="width:70px"></label>
+ <label>Vence <input type="date" value="${f.vence||''}" onchange="ed.vence=this.value"></label>
+ <label>Clasif. fiscal <select onchange="ed.tax=this.value">${db.taxes.map(t=>`<option value="${t.id}" ${t.id===f.tax?'selected':''}>${t.id} (${t.rate}%)</option>`).join('')}</select></label>
+ <label><input type="checkbox" ${f.ley6?'checked':''} onchange="ed.ley6=this.checked"> Aplica Ley 6</label><label><input type="checkbox" ${f.active!==false?'checked':''} onchange="ed.active=this.checked"> Activo</label></div>
+ <h4>Receta (opcional) — descuenta ingredientes al vender</h4>
+ ${(f.recipe||[]).map((i,k)=>`<div class="row">${esc((prod(i.pid)||{name:'?'}).name)} × ${i.qty} <button class="d" onclick="ed.recipe.splice(${k},1);render()">✕</button></div>`).join('')}
+ <div class="row"><select id="ri">${ing.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select><input id="rqn" type="number" step="any" placeholder="Cant. por porción" style="width:140px"><button class="s" onclick="addIng()">+ Ingrediente</button></div>
+ ${rc!==null?`<p>Costo estimado por porción: <b>${M(rc)}</b> · Margen bruto: <b>${f.price>0?Math.round((f.price-rc)/f.price*100):0}%</b></p>`:''}
+ <div class="row"><button class="b" onclick="saveProd()">Guardar</button><button class="s" onclick="ed=null;render()">Cancelar</button></div></div>`;
+}
+function editProd(id){ed=id?JSON.parse(JSON.stringify(prod(id))):{id:uid('P'),code:'',name:'',cat:'General',cost:0,price:0,stock:0,min:0,tax:'GRAV',ley6:true,active:true,recipe:[],isNew:true};render();}
+function addIng(){const id=$('#ri').value,q=+$('#rqn').value;if(!id||!(q>0))return alert('Ingrediente y cantidad.');ed.recipe=ed.recipe||[];ed.recipe.push({pid:id,qty:q});render();}
+function saveProd(){
+ if(!ed.code||!ed.name)return alert('Código y nombre requeridos.');if(!(ed.price>=0)||!(ed.cost>=0))return alert('Precio/costo inválidos.');
+ if(db.products.some(p=>p.code===ed.code&&p.id!==ed.id))return alert('Código duplicado.');
+ const n={...ed};delete n.isNew;if(n.recipe&&n.recipe.length)n.cost=unitCost(n);
+ if(ed.isNew){db.products.push(n);if(n.stock){db.moves.push({t:now(),u:user(),pid:n.id,name:n.name,q:n.stock,type:'Stock inicial',ref:'',why:''});}log('PRODUCTO_NUEVO',n.name+' precio '+M(n.price)+' costo '+M(n.cost));}
+ else{const i=db.products.findIndex(p=>p.id===n.id),o=db.products[i];db.products[i]=n;log('PRODUCTO_EDITADO',n.name+' precio '+M(o.price)+' → '+M(n.price)+' | costo '+M(o.cost)+' → '+M(n.cost)+' | fiscal '+o.tax+' → '+n.tax);}
+ ed=null;save();render();
+}
+function movManual(){
+ const p=prod($('#mp').value),t=$('#mt').value,qn=+$('#mq').value,why=$('#mw').value.trim();
+ if(!(qn>0))return alert('Cantidad inválida.');if(t!=='in'&&!why)return alert('Indica el motivo.');
+ if(t==='in'){move(p,qn,'Ingreso manual','',why);}
+ else{if(p.stock<qn)return alert('No se permite stock negativo.');move(p,-qn,t,'',why);}
+ log('INV_MOVIMIENTO',p.name+' '+t+' '+qn+' '+why);save();render();
+}
+
+/* ================= Compras y proveedores ================= */
+let pl=[];
+const pTotal=p=>r2(p.lines.reduce((a,l)=>a+l.qty*l.cost,0)+(p.extra||0)+(p.taxp||0));
+const pPaid=p=>r2((p.pays||[]).reduce((a,x)=>a+x.monto,0));
+function vCompras(){
+ const pend=db.purchases.filter(p=>p.status!=='cancelada'&&pTotal(p)>pPaid(p));
+ $('#app').innerHTML=`<div class="card"><h3>Proveedores</h3><div class="row">${db.suppliers.map(s=>`<span class="tag">${esc(s)}</span>`).join('')||'Sin proveedores'}<input id="ns" placeholder="Nuevo proveedor"><button class="s" onclick="addSup()">Agregar</button></div></div>
+ <div class="card"><h3>Nueva compra</h3><div class="row"><select id="cs">${db.suppliers.map(s=>`<option>${esc(s)}</option>`).join('')}</select><input id="ci" placeholder="Nº factura proveedor"><label>Fecha compra <input id="cd" type="date" value="${today()}"></label>
+ <label><input type="checkbox" id="cc" onchange="$('#cdue').disabled=!this.checked"> A crédito</label><label>Vence <input id="cdue" type="date" disabled></label>
+ <input id="cex" type="number" step="0.01" placeholder="Transporte $" style="width:110px"><input id="ctx" type="number" step="0.01" placeholder="Impuesto compra $" style="width:130px"></div>
+ <div class="row"><select id="cp">${db.products.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select><input id="cq" type="number" step="any" placeholder="Cantidad" style="width:90px"><input id="cu" type="number" step="0.01" placeholder="Costo unit." style="width:100px"><button class="s" onclick="addPL()">+ Línea</button></div>
+ ${pl.map((l,i)=>`<div class="row">${esc(prod(l.pid).name)} × ${l.qty} a ${M(l.cost)} = ${M(r2(l.qty*l.cost))} <button class="d" onclick="pl.splice(${i},1);render()">✕</button></div>`).join('')}
+ <div class="row"><button class="b" onclick="savePurchase()">Guardar compra</button><b>Líneas: ${M(r2(pl.reduce((a,l)=>a+l.qty*l.cost,0)))}</b></div></div>
+ <div class="card"><h3>Cuentas por pagar</h3>${pend.map(p=>`<div>${p.id} — ${esc(p.supplier)} · saldo <b class="${p.due&&p.due<today()?'red':''}">${M(r2(pTotal(p)-pPaid(p)))}</b> ${p.due?'· vence '+p.due:''}</div>`).join('')||'Sin pendientes'}</div>
+ <div class="card"><h3>Compras</h3>${[...db.purchases].reverse().map(p=>{const rec=p.lines.every(l=>l.rec>=l.qty),any=p.lines.some(l=>l.rec>0);return`<div class="card"><b>${p.id}</b> · ${esc(p.supplier)} · factura ${esc(p.inv)} · compra ${p.fecha} · registrada ${p.reg} · <span class="tag">${p.status==='cancelada'?'cancelada':rec?'recibida':any?'parcialmente recibida':'solicitada'}</span> <span class="tag">${pPaid(p)>=pTotal(p)?'pagada':pPaid(p)>0?'parcialmente pagada':'pendiente de pago'}</span>
+ <table><tr><th>Producto</th><th class="n">Pedido</th><th class="n">Recibido</th><th class="n">Costo</th><th>Recibir ahora</th></tr>${p.lines.map((l,i)=>`<tr><td>${esc(prod(l.pid).name)}</td><td class="n">${l.qty}</td><td class="n">${l.rec}</td><td class="n">${M(l.cost)}</td><td>${p.status!=='cancelada'&&l.rec<l.qty?`<input id="rc${p.id}_${i}" type="number" step="any" min="0" max="${l.qty-l.rec}" style="width:80px">`:''}</td></tr>`).join('')}</table>
+ <p>Transporte ${M(p.extra||0)} · Impuesto ${M(p.taxp||0)} · <b>Total ${M(pTotal(p))}</b> · Pagado ${M(pPaid(p))} · Saldo ${M(r2(pTotal(p)-pPaid(p)))}</p>
+ <div class="row">${p.status!=='cancelada'&&!rec?`<button class="s" onclick="receive('${p.id}')">Registrar recepción</button>`:''}
+ <input id="pp${p.id}" type="number" step="0.01" placeholder="Pago $" style="width:90px"><select id="pq${p.id}"><option>Efectivo</option><option>Yappy</option><option>Tarjeta</option><option>Transferencia</option></select><button class="s" onclick="payPurchase('${p.id}')">Pagar</button>
+ ${!any&&p.status!=='cancelada'?`<button class="d" onclick="cancelPurchase('${p.id}')">Cancelar</button>`:''}</div></div>`;}).join('')||'Sin compras'}</div>`;
+}
+function addSup(){const n=$('#ns').value.trim();if(!n||db.suppliers.includes(n))return alert('Nombre vacío o repetido.');db.suppliers.push(n);log('PROVEEDOR_NUEVO',n);save();render();}
+function addPL(){const id=$('#cp').value,q=+$('#cq').value,c=+$('#cu').value;if(!(q>0)||!(c>=0)||$('#cu').value==='')return alert('Cantidad y costo.');pl.push({pid:id,qty:q,cost:r2(c),rec:0});render();}
+function savePurchase(){
+ const sup=$('#cs').value,inv=$('#ci').value.trim();if(!sup)return alert('Crea un proveedor primero.');if(!inv)return alert('Nº de factura requerido.');if(!pl.length)return alert('Agrega líneas.');
+ if(db.purchases.some(p=>p.supplier===sup&&p.inv===inv&&p.status!=='cancelada'))return alert('Compra duplicada: esa factura de ese proveedor ya está registrada.');
+ const credit=$('#cc').checked,due=$('#cdue').value;if(credit&&!due)return alert('Indica la fecha de vencimiento.');
+ const p={id:uid('C'),supplier:sup,inv,fecha:$('#cd').value,reg:now(),due:credit?due:null,credit,lines:pl.map(l=>({...l})),extra:r2(+$('#cex').value||0),taxp:r2(+$('#ctx').value||0),pays:[],status:'solicitada',user:user()};
+ db.purchases.push(p);pl=[];log('COMPRA_CREADA',p.id+' '+sup+' fact '+inv+' '+M(pTotal(p)));save();render();
+}
+function receive(id){const p=db.purchases.find(x=>x.id===id);let n=0;
+ p.lines.forEach((l,i)=>{const el=$('#rc'+id+'_'+i);const q=el?+el.value:0;if(q>0){if(q>l.qty-l.rec+1e-9)return;move(prod(l.pid),q,'Compra recibida',id);const pr=prod(l.pid);if(!(pr.recipe&&pr.recipe.length)&&pr.cost!==l.cost){log('COSTO_ACTUALIZADO',pr.name+' '+M(pr.cost)+' → '+M(l.cost)+' (compra '+id+')');pr.cost=l.cost;}l.rec+=q;n++;}});
+ if(!n)return alert('Indica cantidades a recibir.');p.status=p.lines.every(l=>l.rec>=l.qty)?'recibida':'parcialmente recibida';p.recepcion=now();log('COMPRA_RECEPCION',id+' '+p.status);save();render();}
+function payPurchase(id){const p=db.purchases.find(x=>x.id===id),m=+$('#pp'+id).value;if(!(m>0))return alert('Monto inválido');if(m>r2(pTotal(p)-pPaid(p))+1e-9)return alert('Excede el saldo.');
+ p.pays.push({t:now(),d:today(),monto:r2(m),m:$('#pq'+id).value});log('COMPRA_PAGO',id+' '+M(m));save();render();}
+async function cancelPurchase(id){if(!await askConfirm('¿Cancelar esta compra?',{title:'Cancelar compra'}))return;db.purchases.find(x=>x.id===id).status='cancelada';log('COMPRA_CANCELADA',id);save();render();}
+
+/* ================= Gastos ================= */
+const CATS=['Servicios públicos','Nómina y costos laborales','Comisiones','Reparaciones','Mantenimiento','Lavandería','Limpieza','Internet','Seguros','Caja chica','Otros'];
+function vGastos(){
+ const by={};db.expenses.filter(e=>e.estado!=='rechazado').forEach(e=>by[e.cat]=r2((by[e.cat]||0)+e.monto));
+ $('#app').innerHTML=`<div class="card"><h3>Registrar gasto</h3><div class="row"><input id="gd" type="date" value="${today()}"><select id="gc">${CATS.map(c=>`<option>${c}</option>`).join('')}</select><select id="ga"><option>Hostal</option><option>Cafetería</option><option>General</option></select>
+ <input id="gm" type="number" step="0.01" placeholder="Importe $" style="width:100px"><select id="gp"><option>Efectivo</option><option>Yappy</option><option>Tarjeta</option><option>Transferencia</option></select><input id="gv" placeholder="Proveedor"><input id="gn" placeholder="Documento / descripción" style="width:200px">
+ <label><input type="checkbox" id="gr"> Recurrente</label><button class="b" onclick="addExp()">Guardar</button></div></div>
+ <div class="card"><h3>Resumen por categoría</h3>${Object.entries(by).map(([k,v])=>`<div>${k}: <b>${M(v)}</b></div>`).join('')||'—'}</div>
+ <div class="card"><h3>Gastos</h3><table><tr><th>Fecha</th><th>Categoría</th><th>Área</th><th class="n">Importe</th><th>Método</th><th>Detalle</th><th>Estado</th><th></th></tr>
+ ${[...db.expenses].reverse().map(e=>`<tr><td>${e.d}</td><td>${e.cat}</td><td>${e.area}</td><td class="n">${M(e.monto)}</td><td>${e.metodo}</td><td>${esc(e.prov)} ${esc(e.nota)}${e.rec?' 🔁':''}<br><small>${esc(e.user)}</small></td><td>${e.estado}</td>
+ <td>${isAdm()&&e.estado==='pendiente'?`<button class="s" onclick="apprExp('${e.id}','aprobado')">Aprobar</button> <button class="s" onclick="apprExp('${e.id}','rechazado')">Rechazar</button>`:''}</td></tr>`).join('')||'<tr><td colspan="8">Sin gastos</td></tr>'}</table></div>`;
+}
+function addExp(){const m=+$('#gm').value;if(!(m>0))return alert('Importe inválido');
+ db.expenses.push({id:uid('G'),d:$('#gd').value,cat:$('#gc').value,area:$('#ga').value,monto:r2(m),metodo:$('#gp').value,prov:$('#gv').value.trim(),nota:$('#gn').value.trim(),rec:$('#gr').checked,user:user(),estado:isAdm()?'aprobado':'pendiente'});
+ log('GASTO',$('#gc').value+' '+M(m));save();render();}
+function apprExp(id,s){const e=db.expenses.find(x=>x.id===id);e.estado=s;log('GASTO_'+s.toUpperCase(),id);save();render();}
+
+/* ================= Inicio y Reportes ================= */
+const inR=(d,a,b)=>!d||(d>=a&&d<=b);
+function finance(a,b){
+ const sales=db.sales.filter(s=>inR(s.d,a,b)),rets=db.returns.filter(r=>inR(r.d,a,b));
+ const netCaf=r2(sales.reduce((x,s)=>x+s.lines.reduce((y,l)=>y+l.base,0),0)-rets.reduce((x,r)=>x+(r.base||0),0));
+ const costCaf=r2(sales.reduce((x,s)=>x+s.lines.reduce((y,l)=>y+(l.cost||0),0),0)-rets.reduce((x,r)=>x+(r.cost||0),0));
+ const hs=db.res.filter(r=>!DEAD.includes(r.status)&&r.status!=='consulta'&&inR(r.in,a,b)).map(r=>({r,c:resCalc(r)}));
+ const incHos=r2(hs.reduce((x,h)=>x+h.c.base+h.c.extras,0));
+ const ex=db.expenses.filter(e=>e.estado==='aprobado'&&inR(e.d,a,b));const exA=ar=>r2(ex.filter(e=>e.area===ar).reduce((x,e)=>x+e.monto,0));
+ return{sales,rets,netCaf,costCaf,hs,incHos,exCaf:exA('Cafetería'),exHos:exA('Hostal'),exGen:exA('General'),l6:r2(sales.reduce((x,s)=>x+s.disc,0)+hs.reduce((x,h)=>x+h.c.disc,0))};
+}
+function vDash(){
+ const t=today(),f=finance(t,t);const by={Efectivo:0,Yappy:0,Tarjeta:0,Transferencia:0};
+ f.sales.forEach(s=>s.pays.forEach(p=>by[p.m]+=p.amt));db.res.forEach(r=>(r.pays||[]).filter(p=>p.d===t).forEach(p=>by[p.m]=(by[p.m]||0)+p.monto));
+ const cxp=db.purchases.filter(p=>p.status!=='cancelada').reduce((a,p)=>a+Math.max(0,pTotal(p)-pPaid(p)),0);
+ const act=db.rooms.filter(r=>r.active&&r.estado!=='fuera de servicio'),occ=act.filter(r=>db.res.some(x=>x.room===r.id&&!DEAD.includes(x.status)&&x.status!=='consulta'&&t>=x.in&&t<x.out)).length;
+ const low=db.products.filter(p=>p.active!==false&&avail(p)<=p.min).length,ven=db.products.filter(p=>p.vence&&p.vence<=addDays(t,30)).length;
+ const k=(a,b)=>`<div class="kpi">${a}<b>${b}</b></div>`;
+ $('#app').innerHTML=`<h3>Inicio — ${t}</h3><div class="grid g3">
+ ${k('Ventas cafetería hoy (c/imp.)',M(f.sales.reduce((a,s)=>a+s.total,0)))}${k('Hostal: ingresos de estadías que inician hoy',M(f.incHos))}${k('Gastos aprobados hoy',M(f.exCaf+f.exHos+f.exGen))}
+ ${k('Cobrado hoy: Efectivo',M(by.Efectivo))}${k('Cobrado hoy: Yappy',M(by.Yappy))}${k('Cobrado hoy: Tarjeta',M(by.Tarjeta))}
+ ${k('Cuentas por pagar',M(cxp))}${k('Ocupación hoy',occ+' / '+act.length)}${k('Caja esperada',db.cur?M(expected(db.cur).expected):'cerrada')}
+ ${k('Alertas de stock',low)}${k('Por vencer / vencidos',ven)}${k('Entradas / salidas hoy',db.res.filter(r=>r.in===t&&!DEAD.includes(r.status)).length+' / '+db.res.filter(r=>r.out===t&&r.status==='alojado').length)}
+ ${k('Compras pendientes de recibir',db.purchases.filter(p=>p.status!=='cancelada'&&!p.lines.every(l=>l.rec>=l.qty)).length)}${k('Pagos Yappy/tarjeta sin confirmar',db.sales.reduce((a,s)=>a+s.pays.filter(p=>p.estado==='pendiente').length,0))}</div>
+ <div class="warn" style="margin-top:10px">Pagos recibidos ≠ ventas registradas. Ver detalle en Reportes.</div>`;
+}
+let rf=today().slice(0,8)+'01',rt=today();
+function vRep(){
+ const f=finance(rf,rt);const byM={Efectivo:0,Yappy:0,Tarjeta:0};f.sales.forEach(s=>s.pays.forEach(p=>byM[p.m]+=p.amt));
+ const prodSales={};f.sales.forEach(s=>s.lines.forEach(l=>{const o=prodSales[l.name]||(prodSales[l.name]={q:0,i:0});o.q+=l.qty;o.i=r2(o.i+l.base);}));
+ const val=r2(db.products.reduce((a,p)=>a+(p.recipe&&p.recipe.length?0:p.stock*p.cost),0));
+ const resCaf=r2(f.netCaf-f.costCaf-f.exCaf),resHos=r2(f.incHos-f.exHos);
+ $('#app').innerHTML=`<div class="card"><div class="row"><label>Desde <input type="date" value="${rf}" onchange="rf=this.value;render()"></label><label>Hasta <input type="date" value="${rt}" onchange="rt=this.value;render()"></label>
+ <button class="s" onclick="csv('ventas')">CSV ventas</button><button class="s" onclick="csv('inventario')">CSV inventario</button><button class="s" onclick="csv('gastos')">CSV gastos</button><button class="s" onclick="csv('compras')">CSV compras</button><button class="s" onclick="csv('reservas')">CSV reservas</button><button class="s" onclick="window.print()">Imprimir / PDF</button></div></div>
+ <div class="card"><h3>Cafetería</h3><table><tr><td>Ventas netas sin impuesto (menos devoluciones)</td><td class="n">${M(f.netCaf)}</td></tr><tr><td>Costo estimado de lo vendido</td><td class="n">${M(f.costCaf)}</td></tr><tr><td>Gastos aprobados (cafetería)</td><td class="n">${M(f.exCaf)}</td></tr><tr><th>Resultado operativo estimado</th><th class="n ${resCaf<0?'red':''}">${M(resCaf)}</th></tr>
+ <tr><td>Cobrado Efectivo / Yappy / Tarjeta</td><td class="n">${M(r2(byM.Efectivo))} / ${M(r2(byM.Yappy))} / ${M(r2(byM.Tarjeta))}</td></tr><tr><td>Devoluciones</td><td class="n">${M(r2(f.rets.reduce((a,r)=>a+r.monto,0)))}</td></tr></table></div>
+ <div class="card"><h3>Hostal</h3><table><tr><td>Reservas activas en el periodo</td><td class="n">${f.hs.length}</td></tr><tr><td>Ingresos sin impuesto (alojamiento + extras)</td><td class="n">${M(f.incHos)}</td></tr><tr><td>ITBMS hospedaje a remitir</td><td class="n">${M(r2(f.hs.reduce((a,h)=>a+h.c.tax,0)))}</td></tr><tr><td>Gastos aprobados (hostal)</td><td class="n">${M(f.exHos)}</td></tr><tr><th>Resultado operativo estimado</th><th class="n ${resHos<0?'red':''}">${M(resHos)}</th></tr><tr><td>Saldo pendiente de huéspedes (CxC)</td><td class="n">${M(r2(f.hs.reduce((a,h)=>a+Math.max(0,h.c.balance),0)))}</td></tr></table></div>
+ <div class="card"><h3>Consolidado</h3><table><tr><td>Gastos generales</td><td class="n">${M(f.exGen)}</td></tr><tr><th>Resultado operativo estimado total</th><th class="n">${M(r2(resCaf+resHos-f.exGen))}</th></tr><tr><td>Descuentos Ley 6 otorgados (cafetería + hostal)</td><td class="n">${M(f.l6)}</td></tr><tr><td>Valoración de inventario (costo)</td><td class="n">${M(val)}</td></tr></table>
+ <small>Estimación administrativa, no es utilidad contable ni fiscal. El saldo de caja no es utilidad.</small></div>
+ <div class="card"><h3>Ventas por producto</h3><table><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Ingreso neto</th></tr>${Object.entries(prodSales).sort((a,b)=>b[1].q-a[1].q).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${v.q}</td><td class="n">${M(v.i)}</td></tr>`).join('')||'<tr><td colspan="3">Sin ventas</td></tr>'}</table></div>`;
+}
+function csv(w){
+ let rows=[];
+ if(w==='ventas')rows=[['id','fecha','usuario','subtotal','descuentos','impuesto','total','pagos','estado']].concat(db.sales.map(s=>[s.id,s.t,s.user,s.sub,s.disc,s.tax,s.total,s.pays.map(p=>p.m+':'+p.amt+':'+p.estado).join('|'),s.status]));
+ if(w==='inventario')rows=[['codigo','producto','categoria','costo','precio','disponible','minimo','fiscal','vence']].concat(db.products.map(p=>[p.code,p.name,p.cat,unitCost(p),p.price,avail(p),p.min,p.tax,p.vence||'']));
+ if(w==='gastos')rows=[['fecha','categoria','area','importe','metodo','proveedor','detalle','estado','usuario']].concat(db.expenses.map(e=>[e.d,e.cat,e.area,e.monto,e.metodo,e.prov,e.nota,e.estado,e.user]));
+ if(w==='compras')rows=[['id','proveedor','factura','fecha','total','pagado','estado']].concat(db.purchases.map(p=>[p.id,p.supplier,p.inv,p.fecha,pTotal(p),pPaid(p),p.status]));
+ if(w==='reservas')rows=[['id','huesped','habitacion','llegada','salida','alojamiento','descuento','impuesto','extras','total','pagado','saldo','estado']].concat(db.res.map(r=>{const c=resCalc(r);return[r.id,r.guest,r.room,r.in,r.out,c.sub,c.disc,c.tax+c.extrasTax,c.extras,c.total,c.paid,c.balance,r.status];}));
+ dl(w+'.csv','\ufeff'+rows.map(r=>r.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(',')).join('\n'),'text/csv');
+}
+function dl(n,t,m){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:m}));a.download=n;a.click();}
+
+/* ================= Configuración ================= */
+function vCfg(){
+ vCfg0();
+ if(SYNC.on){$('#app').insertAdjacentHTML('beforeend','<div class="card"><h3>Copias del servidor</h3><p><small>El servidor guarda una copia por día (60 días) y las últimas 60 versiones. Nada se borra por error.</small></p><div id="srvdays">Cargando…</div></div>');
+  serverDays().then(ds=>{const el=$('#srvdays');if(el)el.innerHTML=ds.map(d=>`<div class="row">${d} <button class="s" onclick="restoreServerDay('${d}')">Restaurar</button></div>`).join('')||'Aún no hay copias.';});}
+}
+function vCfg0(){
+ const L=db.ley6;
+ $('#app').innerHTML=`<div class="card"><h3>Impuestos (protegido: requiere PIN)</h3><div class="warn">Hospedaje: la DGI establece 10 % de ITBMS para alojamiento (no 7 %). Cafetería/comida preparada: 7 %. Bebidas alcohólicas: 10 %. Confirma con tu contador.</div>
+ <table><tr><th>Clase</th><th>Nombre</th><th>Tasa %</th></tr>${db.taxes.map((t,i)=>`<tr><td>${t.id}</td><td>${esc(t.name)}</td><td><input type="number" step="0.01" value="${t.rate}" style="width:80px" onchange="chgTax(${i},this)"></td></tr>`).join('')}</table></div>
+ <div class="card"><h3>Descuento Ley 6 (jubilados)</h3><div class="row"><label>Código <input id="l0" value="${esc(L.code)}" style="width:80px"></label><label>Cafetería %</label><input id="l1" type="number" value="${L.rest}" style="width:70px">
+ <label>Hospedaje lun–jue %</label><input id="l2" type="number" value="${L.hotelWeek}" style="width:70px"><label>Hospedaje vie–dom %</label><input id="l3" type="number" value="${L.hotelWeekend}" style="width:70px"><button class="b" onclick="chgL6()">Guardar (PIN)</button></div></div>
+ <div class="card"><h3>Usuarios</h3><table><tr><th>Nombre</th><th>Rol</th><th>Activo</th><th></th></tr>${db.users.map(u=>`<tr><td>${esc(u.name)}</td><td>${u.role}</td><td>${u.active?'sí':'no'}</td><td>${u.id!==me.id?`<button class="s" onclick="togUser('${u.id}')">${u.active?'Desactivar':'Activar'}</button> <button class="s" onclick="resetPw('${u.id}')">Nueva contraseña</button>`:''}</td></tr>`).join('')}</table>
+ <div class="row"><input id="un" placeholder="Nombre"><select id="ur">${Object.keys(ROLES).filter(r=>r!=='Propietario').map(r=>`<option>${r}</option>`).join('')}</select><input id="up" type="password" placeholder="Contraseña (mín. 8)"><button class="b" onclick="addUser()">Crear usuario</button></div></div>
+ <div class="card"><h3>Respaldo</h3><div class="row"><button class="s" onclick="downloadBackup()">Descargar respaldo</button>
+ <label class="s" style="padding:8px">Restaurar <input type="file" accept=".json" onchange="restore(this.files[0])"></label></div>
+ <p><small>Último respaldo descargado: ${db.lastBackup?new Date(db.lastBackup).toLocaleString('es-PA'):'nunca'}. El sistema te pide uno automáticamente al cerrar la caja.</small></p>
+ <h4>Copias automáticas en este navegador</h4><p><small>Se guardan solas cada 20 minutos de actividad (las 3 más recientes). Sirven si algo se daña, pero se pierden si borras los datos del navegador: la copia descargada es la segura.</small></p>
+ ${snaps().map((s,i)=>`<div class="row">${s.t} <button class="s" onclick="restoreSnap(${i})">Restaurar esta copia</button></div>`).join('')||'<small>Aún no hay copias.</small>'}</div>`;
+}
+async function chgTax(i,el){const old=db.taxes[i].rate;if(!await authorize('Cambiar tasa '+db.taxes[i].id)){el.value=old;return;}db.taxes[i].rate=+el.value;log('CFG_FISCAL',db.taxes[i].id+' '+old+' → '+el.value);save();}
+async function chgL6(){if(!await authorize('Cambiar descuentos Ley 6'))return;const o=JSON.stringify(db.ley6);db.ley6.code=$('#l0').value.trim()||'jubi';db.ley6.rest=+$('#l1').value;db.ley6.hotelWeek=+$('#l2').value;db.ley6.hotelWeekend=+$('#l3').value;log('CFG_LEY6',o+' → '+JSON.stringify(db.ley6));save();alert('Guardado');}
+async function addUser(){const n=$('#un').value.trim(),p=$('#up').value;if(!n||p.length<8)return alert('Nombre y contraseña (mín. 8).');if(db.users.some(u=>u.name.toLowerCase()===n.toLowerCase()))return alert('Ya existe.');
+ if(!await authorize('Crear usuario '+n))return;const salt=uid('S');db.users.push({id:uid('U'),name:n,role:$('#ur').value,salt,hash:await sha(salt+p),active:true});log('USUARIO_CREADO',n+' '+$('#ur').value);save();render();}
+async function togUser(id){if(!await authorize('Activar/desactivar usuario'))return;const u=db.users.find(x=>x.id===id);u.active=!u.active;log('USUARIO_ESTADO',u.name+' '+u.active);save();render();}
+async function resetPw(id){const p=await askText('Nueva contraseña (mínimo 8 caracteres).',{type:'password',title:'Nueva contraseña'});if(!p||p.length<8)return toast('La contraseña debe tener al menos 8 caracteres.');if(!await authorize('Cambiar contraseña'))return;const u=db.users.find(x=>x.id===id);u.salt=uid('S');u.hash=await sha(u.salt+p);log('USUARIO_PASSWORD',u.name);save();alert('Listo');}
+async function restoreSnap(i){const s=snaps()[i];if(!s)return;if(!await askConfirm('Se reemplazarán los datos actuales por la copia del '+s.t+'.',{title:'Restaurar copia',ok:'Restaurar'}))return;try{db=JSON.parse(s.d);migrate();save();log('RESTAURACION','copia automática '+s.t);me=null;sessionStorage.removeItem('gh_me');toast('Copia restaurada. Inicia sesión de nuevo.');boot();}catch(e){toast('La copia está dañada.');}}
+async function restore(f){if(!f)return;if(!await askConfirm('Esto reemplaza todos los datos actuales.',{title:'Restaurar respaldo',ok:'Restaurar'}))return;const r=new FileReader();r.onload=()=>{try{db=JSON.parse(r.result);migrate();save();me=null;sessionStorage.removeItem('gh_me');alert('Restaurado. Inicia sesión de nuevo.');boot();}catch(e){alert('Archivo inválido')}};r.readAsText(f);}
+function vAud(){$('#app').innerHTML=`<div class="card"><h3>Registro de actividad</h3><table><tr><th>Fecha</th><th>Usuario</th><th>Operación</th><th>Detalle</th></tr>${[...db.audit].reverse().slice(0,400).map(a=>`<tr><td>${a.t}</td><td>${esc(a.u)}</td><td>${a.op}</td><td>${esc(a.detail)}</td></tr>`).join('')||'<tr><td colspan="4">Vacío</td></tr>'}</table></div>`;}
+/* ================= Sincronización con el servidor (Netlify) ================= */
+// Si la página corre en Netlify con la función /api, todo se guarda en el servidor y se comparte entre equipos.
+// Si no hay servidor (archivo local), funciona igual que antes: datos solo en este navegador.
+const SYNC={on:false,inited:false,rev:0,base:null,dirty:false,busy:false,key:'',status:'local',stale:false,t:null};
+const J=x=>JSON.stringify(x);
+const clone=x=>x===undefined?undefined:JSON.parse(JSON.stringify(x));
+const syncable=()=>{const o={...db};delete o.loginFails;return o;};
+const lsSave=()=>{try{localStorage.setItem(KEY,JSON.stringify(db));}catch(e){}};
+function persistBase(){try{localStorage.setItem(KEY+'_rev',String(SYNC.rev));localStorage.setItem(KEY+'_base',J(SYNC.base));}catch(e){try{localStorage.removeItem(KEY+'_base');}catch(_){}}}
+function setDirty(v){SYNC.dirty=v;try{v?localStorage.setItem(KEY+'_dirty','1'):localStorage.removeItem(KEY+'_dirty');}catch(e){}}
+function setSync(st){
+ if(st)SYNC.status=st;const el=$('#sync');if(!el)return;
+ const m={local:'💾 Modo local: los datos están solo en este equipo.',ok:`☁ Guardado en el servidor ✓ (versión ${SYNC.rev})`,pending:'⏳ Guardando en el servidor…',offline:'⚠ Sin conexión: los cambios quedan en este equipo y se suben solos al volver internet.',auth:'⚠ Clave de acceso incorrecta o cambiada. <button class="s" onclick="syncChangeKey()">Escribir clave</button>',error:'⚠ No se pudo guardar en el servidor. <button class="s" onclick="syncPush()">Reintentar</button>'};
+ el.innerHTML=(m[SYNC.status]||'')+(SYNC.stale?' <button class="s" onclick="render()">↻ Actualizar pantalla</button>':'');
+ el.style.color=['ok','local','pending'].includes(SYNC.status)?'#2f6b3f':'#b3261e';
+}
+async function api(method,qs,bodyStr,keyOverride){
+ try{
+  const r=await fetch('/api'+(qs||''),{method,headers:{'x-access-key':keyOverride||SYNC.key,'content-type':'application/json'},body:bodyStr,cache:'no-store'});
+  let b=null;try{b=await r.json();}catch(e){}
+  return{status:r.status,body:b};
+ }catch(e){return{status:0,body:null};}
+}
+/* ---- fusión de cambios simultáneos (3 vías: base, local, remoto) ---- */
+function mergeLists(b,l,r){
+ b=b||[];
+ const idMode=[...b,...l,...r].some(x=>x&&typeof x==='object'&&!Array.isArray(x)&&x.id!==undefined);
+ if(!idMode){ // sin id (auditoría, movimientos, textos): suma lo nuevo de cada lado
+  const out=r.slice(),rs=new Set(r.map(J)),bs=new Set(b.map(J));
+  for(const x of l){const s=J(x);if(!bs.has(s)&&!rs.has(s)){out.push(x);rs.add(s);}}
+  return out;
+ }
+ const bm=new Map(b.map(x=>[x.id,x])),rm=new Map(r.map(x=>[x.id,x])),lm=new Map(l.map(x=>[x.id,x]));
+ const out=r.slice(),idx=new Map(out.map((x,i)=>[x.id,i]));
+ for(const x of l){
+  const bx=bm.get(x.id),rx=rm.get(x.id);
+  if(!rx){if(!bx){idx.set(x.id,out.length);out.push(x);}continue;} // nuevo local; si el remoto lo borró, se respeta
+  if(!bx)continue;                                    // ambos lo crearon distinto: gana el servidor
+  if(J(x)===J(bx))continue;                           // local no lo tocó
+  if(J(rx)===J(bx)){out[idx.get(x.id)]=x;continue;}   // solo cambió local
+  out[idx.get(x.id)]=mergeRec(bx,x,rx);               // cambiaron ambos: campo por campo
+ }
+ for(const bx of b){if(!lm.has(bx.id)){const i=out.findIndex(x=>x.id===bx.id);if(i>=0&&J(out[i])===J(bx))out.splice(i,1);}} // borrados locales
+ return out;
+}
+function mergeRec(b,l,r){
+ b=b||{};const out={...r};
+ for(const k of new Set([...Object.keys(l),...Object.keys(r),...Object.keys(b)])){
+  const bv=b[k],lv=l[k],rv=r[k];
+  if(J(lv)===J(bv))continue;
+  if(J(rv)===J(bv)){if(lv===undefined)delete out[k];else out[k]=clone(lv);continue;}
+  if(k==='stock'&&typeof lv==='number'&&typeof rv==='number'&&typeof bv==='number'){out[k]=Math.round((rv+(lv-bv))*1000)/1000;continue;} // suma los cambios de inventario de ambos
+  if(Array.isArray(lv)&&Array.isArray(rv)){out[k]=mergeLists(Array.isArray(bv)?bv:[],lv,rv);continue;}
+  if(bv===undefined)continue;                          // sin base: gana el servidor
+  out[k]=clone(lv);
+ }
+ return out;
+}
+function merge3(base,local,remote){
+ base=base||{};const out=clone(remote);
+ for(const k of new Set([...Object.keys(local),...Object.keys(remote),...Object.keys(base)])){
+  if(k==='loginFails')continue;
+  const bv=base[k],lv=local[k],rv=remote[k];
+  if(J(lv)===J(bv))continue;
+  if(J(rv)===J(bv)){if(lv===undefined)delete out[k];else out[k]=clone(lv);continue;}
+  if(Array.isArray(lv)&&Array.isArray(rv))out[k]=mergeLists(Array.isArray(bv)?bv:[],lv,rv);
+  else if(lv&&rv&&typeof lv==='object'&&typeof rv==='object'&&!Array.isArray(lv)&&!Array.isArray(rv))out[k]=mergeRec(bv&&typeof bv==='object'?bv:{},lv,rv);
+  else if(bv!==undefined)out[k]=clone(lv);
+ }
+ return out;
+}
+/* ---- aplicar datos del servidor ---- */
+function typing(){const a=document.activeElement;return !!(a&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName))||!!document.querySelector('.ov');}
+function applyRemote(rev,remote,{silent=false}={}){
+ const lf=db.loginFails;
+ db=merge3(SYNC.base,syncable(),remote);db.loginFails=lf||{};migrate();
+ SYNC.rev=rev;SYNC.base=clone(remote);persistBase();lsSave();
+ setDirty(J(syncable())!==J(remote));
+ if(me){const u=db.users.find(x=>x.id===me.id);if(!u||!u.active){me=null;sessionStorage.removeItem('gh_me');toast('Tu usuario fue desactivado.');boot();return;}me=u;}
+ if(!silent&&me){
+  if(['dash','pos','hist','caja','rep','aud'].includes(view)&&!typing())render();
+  else{SYNC.stale=true;setSync();}
+  toast('Se actualizaron datos desde otro equipo.');
+ }
+}
+/* ---- subir cambios ---- */
+async function syncPush(){
+ if(!SYNC.on||SYNC.busy||!SYNC.dirty)return;
+ SYNC.busy=true;let again=false;
+ try{
+  for(let i=0;i<5;i++){
+   const snap=J(syncable());
+   const r=await api('PUT','','{"baseRev":'+SYNC.rev+',"db":'+snap+'}');
+   if(r.status===200&&r.body&&typeof r.body.rev==='number'){
+    SYNC.rev=r.body.rev;SYNC.base=JSON.parse(snap);persistBase();
+    const changed=J(syncable())!==snap;setDirty(changed);again=changed;setSync(changed?'pending':'ok');break;
+   }
+   if(r.status===409&&r.body){applyRemote(r.body.rev,r.body.db||{},{silent:true});if(!SYNC.dirty){setSync('ok');break;}continue;}
+   if(r.status===0){setSync('offline');break;}
+   if(r.status===401){setSync('auth');break;}
+   if(r.status===413){setSync('error');toast(r.body&&r.body.message||'Demasiado grande para guardar en el servidor. Descarga un respaldo.');break;}
+   setSync('error');break;
+  }
+ }finally{SYNC.busy=false;}
+ if(again)SYNC.t=setTimeout(syncPush,800);
+}
+function syncMark(){
+ if(!SYNC.on)return;
+ setDirty(true);setSync('pending');clearTimeout(SYNC.t);SYNC.t=setTimeout(syncPush,1200);
+}
+/* ---- leer cambios de otros equipos ---- */
+async function syncPoll(){
+ if(!SYNC.on||SYNC.busy)return;
+ if(SYNC.dirty){await syncPush();return;}
+ const r=await api('GET','?rev='+SYNC.rev);
+ if(r.status===0){setSync('offline');return;}
+ if(r.status===401){setSync('auth');return;}
+ if(r.status!==200||!r.body)return;
+ if(r.body.same){if(SYNC.status!=='ok'&&SYNC.status!=='pending')setSync('ok');return;}
+ if(r.body.db){applyRemote(r.body.rev,r.body.db);setSync('ok');}
+}
+async function syncChangeKey(){
+ const k=await askText('Escribe la clave de acceso del sistema.',{type:'password',title:'Clave de acceso'});
+ if(!k)return;SYNC.key=k;localStorage.setItem('gh_access_key',k);
+ const r=await api('GET','?rev='+SYNC.rev);if(r.status===401){toast('Clave incorrecta.');return;}setSync('ok');syncPoll();syncPush();
+}
+const hasData=()=>db.users&&db.users.length>0;
+async function syncInit(){
+ if(SYNC.inited)return;SYNC.inited=true;
+ if(location.protocol!=='https:'&&location.hostname!=='localhost'&&location.hostname!=='127.0.0.1'){setSync('local');return;}
+ let key=localStorage.getItem('gh_access_key')||'';
+ const stored=localStorage.getItem(KEY+'_rev');
+ for(let tries=0;tries<4;tries++){
+  const probe=await api('GET','?rev='+(+stored||0),null,key||'x');
+  if(probe.status===0){ // sin conexión: seguir con lo guardado en este equipo
+   if(key&&stored!==null){SYNC.on=true;SYNC.key=key;SYNC.rev=+stored;try{SYNC.base=JSON.parse(localStorage.getItem(KEY+'_base')||'null');}catch(e){SYNC.base=null;}SYNC.dirty=localStorage.getItem(KEY+'_dirty')==='1';startSync();setSync('offline');}
+   else setSync('local');
+   return;
+  }
+  if(probe.status===404||(probe.status===200&&(!probe.body||typeof probe.body.rev!=='number'))){setSync('local');return;} // no hay función /api
+  if(probe.status===500){toast(probe.body&&probe.body.message||'El servidor no está configurado.');await askInfo((probe.body&&probe.body.message)||'El servidor no está configurado.',{title:'Configuración pendiente en Netlify'});setSync('local');return;}
+  if(probe.status===401||!key){
+   if(key)toast('Clave incorrecta.');
+   key=await askText('Escribe la clave de acceso del sistema (la que definiste en Netlify).',{type:'password',title:'Clave de acceso'});
+   if(!key){setSync('local');return;}
+   continue;
+  }
+  if(probe.status===200){
+   localStorage.setItem('gh_access_key',key);SYNC.on=true;SYNC.key=key;
+   await firstSync(probe.body,stored);startSync();return;
+  }
+  setSync('error');return;
+ }
+ setSync('auth');
+}
+async function firstSync(s,stored){
+ const localHas=hasData();
+ if(s.same&&!localHas){const r2=await api('GET','?rev=0');if(r2.status===200&&r2.body)s=r2.body;}
+ if(s.rev===0){ // servidor vacío
+  SYNC.rev=0;SYNC.base=null;
+  if(localHas){setDirty(true);await syncPush();}else setSync('ok');
+  return;
+ }
+ if(!localHas){ // equipo nuevo: adoptar datos del servidor
+  db=clone(s.db);db.loginFails={};migrate();SYNC.rev=s.rev;SYNC.base=clone(s.db);persistBase();lsSave();setDirty(false);setSync('ok');return;
+ }
+ if(stored!==null){ // equipo que ya sincronizaba antes
+  SYNC.rev=+stored;try{SYNC.base=JSON.parse(localStorage.getItem(KEY+'_base')||'null');}catch(e){SYNC.base=null;}
+  SYNC.dirty=localStorage.getItem(KEY+'_dirty')==='1';
+  if(s.same){setSync(SYNC.dirty?'pending':'ok');if(SYNC.dirty)syncPush();return;}
+  applyRemote(s.rev,s.db,{silent:true});setSync('ok');if(SYNC.dirty)syncPush();return;
+ }
+ // este equipo tiene datos propios sin sincronizar y el servidor ya tiene otros
+ const c=await askChoice('Este equipo tiene datos guardados antes de conectarse al servidor, y el servidor ya tiene otros datos. ¿Cuáles usar?',[
+  {v:'server',l:'Usar los datos del servidor (recomendado). Los de este equipo se descargan como respaldo.'},
+  {v:'local',l:'Subir los datos de este equipo y reemplazar los del servidor (el servidor guarda copia de lo anterior).'}],{title:'Primera conexión',ok:'Continuar',noCancel:true});
+ if(c==='local'){SYNC.rev=s.rev;SYNC.base=clone(s.db);setDirty(true);db.loginFails=db.loginFails||{};
+  // reemplazo explícito: se envía el estado local sobre la revisión actual
+  const snap=J(syncable()),r=await api('PUT','','{"baseRev":'+s.rev+',"db":'+snap+'}');
+  if(r.status===200){SYNC.rev=r.body.rev;SYNC.base=JSON.parse(snap);persistBase();setDirty(false);setSync('ok');return;}
+  toast('No se pudo subir. Se usarán los datos del servidor.');
+ }
+ try{dl('respaldo-de-este-equipo-'+today()+'.json',JSON.stringify(db),'application/json');}catch(e){}
+ db=clone(s.db);db.loginFails={};migrate();SYNC.rev=s.rev;SYNC.base=clone(s.db);persistBase();lsSave();setDirty(false);setSync('ok');
+}
+function startSync(){
+ setInterval(syncPoll,20000);
+ window.addEventListener('online',()=>{syncPush();syncPoll();});
+ document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')syncPoll();else syncPush();});
+}
+/* copias del servidor (historial diario) */
+async function serverDays(){const r=await api('GET','?list');return r.status===200&&r.body?r.body.days:[];}
+async function restoreServerDay(d){
+ if(!await askConfirm('Se reemplazarán los datos actuales por la copia del servidor del '+d+'. Lo actual queda guardado en el historial.',{title:'Restaurar copia del servidor',ok:'Restaurar'}))return;
+ const r=await api('GET','?daily='+d);if(r.status!==200||!r.body||!r.body.db)return toast('No se pudo leer esa copia.');
+ db=r.body.db;db.loginFails={};migrate();log('RESTAURACION','copia del servidor '+d);save();toast('Copia restaurada y guardada. Inicia sesión de nuevo.');me=null;sessionStorage.removeItem('gh_me');boot();
+}
+
+try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist();}catch(e){}
+boot();
+</script>
+</body>
+</html>

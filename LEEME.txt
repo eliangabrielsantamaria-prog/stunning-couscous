@@ -1,0 +1,10 @@
+THE GARDEN HOUSE BOQUETE - Management System (versión con guardado en Netlify)
+
+Contenido de esta carpeta (súbela COMPLETA a GitHub, sin cambiar nombres):
+  public/index.html            -> el sistema (lo que ven los usuarios)
+  netlify/functions/api.mjs    -> el servidor que guarda los datos (Netlify Blobs)
+  netlify.toml                 -> configuración de Netlify
+  package.json                 -> dependencia del servidor
+
+Pasos completos con capturas de qué hacer: ver el PDF "Guia-publicar-en-Netlify.pdf".
+Resumen: GitHub (repositorio privado) -> Netlify (Import from Git) -> variable GH_ACCESS_KEY -> redeploy.
